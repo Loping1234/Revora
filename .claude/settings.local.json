@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /d \"C:\\\\Users\\\\PRANAY\\\\OneDrive\\\\Documents\\\\Task_App\\\\DP_DI\")",
+      "Bash(ls -la server/ client/)",
+      "Bash(dir server *)"
+    ]
+  }
+}

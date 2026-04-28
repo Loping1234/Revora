@@ -1,0 +1,210 @@
+import mongoose from "mongoose";
+
+const demandModelSchema = new mongoose.Schema(
+  {
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product",
+      required: true,
+      index: true
+    },
+    segment: {
+      type: String,
+      required: true,
+      default: "all",
+      index: true
+    },
+    a: {
+      type: Number,
+      required: true
+    },
+    b: {
+      type: Number,
+      required: true
+    },
+    modelType: {
+      type: String,
+      enum: ["linear", "log-log", "context-adjusted"],
+      required: true,
+      default: "linear"
+    },
+    modelFamily: {
+      type: String,
+      enum: ["simple_price_response", "context_adjusted"],
+      required: true,
+      default: "simple_price_response"
+    },
+    formulaText: {
+      type: String,
+      required: true,
+      default: "Expected demand = baseline demand - price response x price"
+    },
+    featuresUsed: {
+      type: [String],
+      default: []
+    },
+    featureImportance: {
+      type: [
+        {
+          feature: String,
+          label: String,
+          coefficient: Number,
+          direction: String,
+          impact: Number
+        }
+      ],
+      default: []
+    },
+    seasonalityUsed: {
+      type: Boolean,
+      default: false
+    },
+    promotionUsed: {
+      type: Boolean,
+      default: false
+    },
+    competitorUsed: {
+      type: Boolean,
+      default: false
+    },
+    contextModel: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    modelComparison: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    readinessLevel: {
+      type: String,
+      enum: ["Not enough data", "Summary only", "Simple model ready", "Context model ready", "ML model ready"],
+      default: "Not enough data",
+      index: true
+    },
+    readinessDetails: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    accuracyMetrics: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    mlReadiness: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    limitations: {
+      type: [String],
+      default: []
+    },
+    stdErr: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    rSquared: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 1
+    },
+    recordsUsed: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    rawRowsUsed: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0
+    },
+    groupedDemandPoints: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0
+    },
+    distinctPriceCount: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0
+    },
+    reliabilityScore: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+      max: 100
+    },
+    reliabilityLabel: {
+      type: String,
+      enum: ["Strong", "Usable", "Weak"],
+      required: true,
+      default: "Weak"
+    },
+    reliabilityReasons: {
+      type: [String],
+      default: []
+    },
+    aggregationSummary: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    excludedRows: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0
+    },
+    priceRangeMin: {
+      type: Number,
+      min: 0
+    },
+    priceRangeMax: {
+      type: Number,
+      min: 0
+    },
+    averagePrice: {
+      type: Number,
+      min: 0
+    },
+    averageDemand: {
+      type: Number,
+      min: 0
+    },
+    demandRangeMin: {
+      type: Number,
+      min: 0
+    },
+    demandRangeMax: {
+      type: Number,
+      min: 0
+    },
+    dataStartDate: {
+      type: Date
+    },
+    dataEndDate: {
+      type: Date
+    },
+    modelWarnings: {
+      type: [String],
+      default: []
+    },
+    trainingSummary: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    lastUpdated: {
+      type: Date,
+      required: true,
+      default: Date.now
+    }
+  },
+  { timestamps: true }
+);
+
+demandModelSchema.index({ productId: 1, segment: 1 }, { unique: true });
+
+export const DemandModel = mongoose.model("DemandModel", demandModelSchema);

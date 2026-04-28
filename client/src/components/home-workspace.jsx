@@ -1,0 +1,355 @@
+import {
+  BarChart3,
+  BadgeDollarSign,
+  Boxes,
+  Calculator,
+  CalendarDays,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  ChevronUp,
+  Database,
+  FileDown,
+  Gauge,
+  GitBranch,
+  History,
+  LineChart,
+  Menu,
+  Package,
+  PieChart,
+  Settings,
+  ShieldCheck,
+  Target,
+  TrendingUp,
+  Upload,
+  UserRound,
+  Users,
+  X
+} from "lucide-react";
+import { useState } from "react";
+import { login } from "../lib/api";
+import { objectiveOptions, sidebarItems } from "../config/navigation";
+import {
+  formatCurrency,
+  formatNumber,
+  formatPercent,
+  formatSegmentName,
+  getConfidenceLabel,
+  getPriceSensitivityLabel
+} from "../utils/formatters";
+import {
+  getReadinessStyles,
+  getReliabilityStyles,
+  getResultModeStyles
+} from "../utils/statusStyles";
+import {
+  HorizontalBars,
+  MiniRevenueTrend,
+  SummaryCard,
+  WarningPanel
+} from "./common";
+
+export function HomeOverview({
+  dashboardData,
+  dashboardState,
+  dashboardMessage,
+  resetState,
+  resetMessage,
+  currency,
+  status,
+  error,
+  handleResetData,
+  setActivePanel,
+  refreshDashboard,
+  totalSalesRecords,
+  totalFittedModels
+}) {
+  const metrics = dashboardData?.metrics || {};
+  const trend = dashboardData?.trend || [];
+  const segments = (dashboardData?.segments || []).map((item) => ({ ...item, label: item.label || formatSegmentName(item.segment) }));
+  const categories = dashboardData?.categories || [];
+  const recentRecommendations = dashboardData?.recentRecommendations || [];
+  const sources = dashboardData?.sources || [];
+  const activeSource = sources[0];
+  const salesRecords = metrics.salesRecords ?? totalSalesRecords;
+  const modelCount = metrics.modelCount ?? totalFittedModels;
+  const isEmpty = !salesRecords;
+  const [activeHomeTab, setActiveHomeTab] = useState("overview");
+  const actionItems = [
+    {
+      label: "Upload sales data",
+      note: salesRecords ? `${formatNumber(salesRecords)} sales rows available` : "Start by importing a CSV",
+      done: salesRecords > 0,
+      target: "dataWorkspace"
+    },
+    {
+      label: "Check data quality",
+      note: "Confirm model-ready and summary-only products",
+      done: salesRecords > 0,
+      target: "dataWorkspace"
+    },
+    {
+      label: "Create pricing insight",
+      note: modelCount ? `${formatNumber(modelCount)} insights ready` : "Measure price response",
+      done: modelCount > 0,
+      target: "modelsWorkspace"
+    },
+    {
+      label: "Run scenario planner",
+      note: "Compare multiple prices side by side",
+      done: false,
+      target: "decisionsWorkspace"
+    },
+    {
+      label: "Generate recommendation",
+      note: metrics.recommendationCount ? `${formatNumber(metrics.recommendationCount)} recommendations saved` : "Find best profit or revenue price",
+      done: Number(metrics.recommendationCount || 0) > 0,
+      target: "decisionsWorkspace"
+    },
+    {
+      label: "Export examiner report",
+      note: "Download a workbook with assumptions and outputs",
+      done: Number(metrics.recommendationCount || 0) > 0,
+      target: "exports"
+    }
+  ];
+  const homeTabs = [
+    { id: "overview", label: "Overview" },
+    { id: "breakdown", label: "Breakdown" },
+    { id: "recent", label: "Recent" }
+  ];
+  const businessFlow = [
+    "Upload sales history",
+    "Check data quality",
+    "Measure customer price response",
+    "Run scenario planner",
+    "Generate recommendation",
+    "Export recommendation with assumptions"
+  ];
+
+  return (
+    <div className="grid gap-4">
+      <section className="shrink-0 rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-medium uppercase text-slate-500">Revenue Snapshot</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">Pricing workspace overview</h2>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              className="inline-flex h-9 w-full items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 sm:w-auto"
+              onClick={refreshDashboard}
+              type="button"
+            >
+              Refresh snapshot
+            </button>
+            <button
+              className="inline-flex h-9 w-full items-center justify-center rounded-md border border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              disabled={resetState === "running"}
+              onClick={handleResetData}
+              type="button"
+            >
+              {resetState === "running" ? "Resetting" : "Reset data"}
+            </button>
+          </div>
+        </div>
+        {dashboardMessage && dashboardState === "error" && <p className="mt-3 text-sm text-rose-700">{dashboardMessage}</p>}
+        {resetMessage && <p className={`mt-3 text-sm ${resetState === "error" ? "text-rose-700" : "text-emerald-700"}`}>{resetMessage}</p>}
+        <div className="mt-4 grid gap-2 border-t border-slate-100 pt-4 sm:grid-cols-5">
+          {businessFlow.map((item, index) => (
+            <div key={item} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-medium uppercase text-slate-500">Step {index + 1}</p>
+              <p className="mt-1 text-sm font-medium text-slate-900">{item}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {isEmpty && (
+        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+          <section className="rounded-lg border border-dashed border-slate-300 bg-white p-4">
+            <h3 className="text-lg font-semibold text-slate-950">Upload sales data to unlock revenue insights.</h3>
+            <p className="mt-2 max-w-3xl text-sm text-slate-500">
+              Import one clean CSV to populate revenue trends, customer groups, categories, and recommendations for your demo.
+            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <button className="inline-flex h-10 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-medium text-white" onClick={() => setActivePanel("dataWorkspace")} type="button">
+                Go to Sales Data
+              </button>
+              <button className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700" onClick={() => setActivePanel("modelsWorkspace")} type="button">
+                Create Pricing Insight
+              </button>
+            </div>
+          </section>
+
+          <section className="overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+            <h3 className="text-base font-semibold">What Needs Attention</h3>
+            <div className="mt-3 grid gap-2">
+              {actionItems.map((item) => (
+                <button
+                  key={item.label}
+                  className="flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-left hover:border-slate-300 hover:bg-white"
+                  onClick={() => setActivePanel(item.target)}
+                  type="button"
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-slate-900">{item.label}</span>
+                    <span className="mt-1 block truncate text-xs text-slate-500">{item.note}</span>
+                  </span>
+                  <span className={`mt-0.5 shrink-0 rounded-md px-2 py-1 text-xs font-medium ${item.done ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                    {item.done ? "Ready" : "Next"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {!isEmpty && <div className="shrink-0 rounded-lg border border-slate-200 bg-white p-1">
+        <div className="grid grid-cols-3 gap-1">
+          {homeTabs.map((tab) => (
+            <button
+              key={tab.id}
+              className={`h-9 rounded-md text-sm font-medium ${activeHomeTab === tab.id ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+              onClick={() => setActiveHomeTab(tab.id)}
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>}
+
+      {!isEmpty && <div className="min-h-0 flex-1 overflow-hidden">
+        {activeHomeTab === "overview" && (
+          <div className="grid h-full min-h-0 gap-4 xl:grid-rows-[auto_minmax(0,1fr)]">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <SummaryCard icon={TrendingUp} label="Total Revenue" value={formatCurrency(metrics.totalRevenue, currency)} note="From imported sales" />
+              <SummaryCard icon={Target} label="Total Profit" value={formatCurrency(metrics.totalProfit, currency)} note="After product costs" />
+              <SummaryCard icon={Database} label="Sales Rows" value={formatNumber(salesRecords)} note={`${formatNumber(metrics.totalUnits)} units sold`} />
+              <SummaryCard icon={CheckCircle2} label="Pricing Insights Ready" value={formatNumber(modelCount)} note={`${formatNumber(metrics.recommendationCount)} recommendations saved`} />
+              <SummaryCard icon={Gauge} label="Model-Ready Products" value={formatNumber(metrics.modelReadyProducts || 0)} note="Ready or limited for insight" />
+              <SummaryCard icon={X} label="Summary-Only Products" value={formatNumber(metrics.summaryOnlyProducts || 0)} note="Need more price variation" />
+              <SummaryCard icon={Package} label="Top Revenue Product" value={dashboardData?.businessHighlights?.topRevenueProduct?.name || "Not available"} note={dashboardData?.businessHighlights?.topRevenueProduct ? formatCurrency(dashboardData.businessHighlights.topRevenueProduct.revenue, currency) : "Upload data first"} />
+              <SummaryCard icon={BadgeDollarSign} label="Highest Profit Product" value={dashboardData?.businessHighlights?.topProfitProduct?.name || "Not available"} note={dashboardData?.businessHighlights?.topProfitProduct ? formatCurrency(dashboardData.businessHighlights.topProfitProduct.profit, currency) : "Upload data first"} />
+            </div>
+
+            <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.9fr)]">
+              <section className="min-h-0 rounded-lg border border-slate-200 bg-white p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-semibold">Revenue by Month</h3>
+                    <p className="mt-1 text-xs text-slate-500">Monthly sales movement from imported history.</p>
+                  </div>
+                  <LineChart className="text-slate-500" size={18} />
+                </div>
+                <MiniRevenueTrend currency={currency} items={trend} />
+              </section>
+
+              <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+                {activeSource && (
+                  <div className={`mb-3 rounded-md border p-3 ${sources.length > 1 ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium uppercase text-slate-500">Active dataset</p>
+                        <p className="mt-1 truncate text-sm font-semibold text-slate-900">{activeSource.source}</p>
+                      </div>
+                      <div className="shrink-0 text-right text-xs text-slate-600">
+                        <p>{formatNumber(activeSource.rows)} rows</p>
+                        <p>{formatCurrency(activeSource.revenue, currency)}</p>
+                      </div>
+                    </div>
+                    {sources.length > 1 && <p className="mt-2 text-xs text-amber-800">Multiple import sources are present. Reset and reload one CSV for a clean demo.</p>}
+                  </div>
+                )}
+
+                <h3 className="text-base font-semibold">What Needs Attention</h3>
+                <div className="mt-3 grid gap-2">
+                  {actionItems.map((item) => (
+                    <button
+                      key={item.label}
+                      className="flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-left hover:border-slate-300 hover:bg-white"
+                      onClick={() => setActivePanel(item.target)}
+                      type="button"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-slate-900">{item.label}</span>
+                        <span className="mt-1 block truncate text-xs text-slate-500">{item.note}</span>
+                      </span>
+                      <span className={`mt-0.5 shrink-0 rounded-md px-2 py-1 text-xs font-medium ${item.done ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                        {item.done ? "Ready" : "Next"}
+                      </span>
+                    </button>
+                  ))}
+                  <div className={`rounded-md border p-3 text-sm ${status === "online" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-800"}`}>
+                    {status === "online" ? "System online and ready for pricing work." : error || "System needs attention."}
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        )}
+
+        {activeHomeTab === "breakdown" && (
+          <div className="grid h-full min-h-0 gap-4 xl:grid-cols-2">
+            <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+              <h3 className="text-base font-semibold">Customer Groups</h3>
+              <p className="mt-1 text-sm text-slate-500">Revenue contribution by customer type.</p>
+              <div className="mt-4">
+                <HorizontalBars items={segments} labelKey="label" valueKey="revenue" valueFormatter={(value) => formatCurrency(value, currency)} emptyText="No customer group data available yet." />
+              </div>
+            </section>
+
+            <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+              <h3 className="text-base font-semibold">Category Performance</h3>
+              <p className="mt-1 text-sm text-slate-500">Highest revenue categories in the workspace.</p>
+              <div className="mt-4">
+                <HorizontalBars items={categories.slice(0, 8)} labelKey="category" valueKey="revenue" valueFormatter={(value) => formatCurrency(value, currency)} emptyText="No category data available yet." />
+              </div>
+            </section>
+          </div>
+        )}
+
+        {activeHomeTab === "recent" && (
+          <section className="h-full min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-base font-semibold">Recent Recommendations</h3>
+                <p className="mt-1 text-sm text-slate-500">Latest pricing decisions saved by the workspace.</p>
+              </div>
+              <button className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700" onClick={() => setActivePanel("performanceWorkspace")} type="button">
+                View History
+              </button>
+            </div>
+
+            {recentRecommendations.length ? (
+              <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                {recentRecommendations.slice(0, 6).map((item) => (
+                  <article key={item._id} className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <p className="truncate text-sm font-semibold text-slate-900">{item.product?.name || "Unknown product"}</p>
+                    <p className="mt-1 text-xs text-slate-500">{getObjectiveLabel(item.objective)} - {item.segmentLabel || formatSegmentName(item.segment)}</p>
+                    <div className="mt-4 grid gap-2 text-sm">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-slate-500">Recommended price</span>
+                        <span className="font-medium text-slate-900">{formatCurrency(item.recommendedPrice, currency)}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-slate-500">Expected profit</span>
+                        <span className="font-medium text-slate-900">{formatCurrency(item.expectedProfit, currency)}</span>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">No recommendations yet. Generate one from Best Price Recommendation.</p>
+            )}
+          </section>
+        )}
+      </div>}
+    </div>
+  );
+}
