@@ -1,6 +1,8 @@
 import { DemandModel } from "../models/demand-model.model.js";
 import { Product } from "../models/product.model.js";
+import { buildPredictionRange, summarizeBacktest } from "./data-fitness.service.js";
 import { fitDemandModel, getDemandModelWarnings, getInsightSummary, isSupportedSegment, predictDemandFromModel } from "./demand-model.service.js";
+import { getActiveImportBatchId } from "./import-batch.service.js";
 import { formatSegmentLabel } from "../utils/segments.js";
 
 export function round(value, digits = 2) {
@@ -111,9 +113,11 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
   }
 
   let model = await DemandModel.findOne({ productId, segment }).lean();
+  const activeImportBatchId = await getActiveImportBatchId();
+  const modelImportBatchId = model?.activeImportBatchId ? String(model.activeImportBatchId) : null;
   let modelCreated = false;
 
-  if (!model) {
+  if (!model || modelImportBatchId !== (activeImportBatchId || null) || !model.dataFitnessLabel) {
     try {
       model = await fitDemandModel({ productId, segment });
       modelCreated = true;
@@ -150,6 +154,19 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
           score: 0,
           reasons: summary.blockingReasons || []
         },
+        dataFitnessScore: summary.dataFitnessScore || 0,
+        dataFitnessLabel: summary.dataFitnessLabel || "Summary only",
+        businessRiskLevel: "High",
+        costQuality: summary.costQuality || {},
+        predictionRange: buildPredictionRange({
+          demand,
+          revenue,
+          profit,
+          price: numericPrice,
+          cost: product.cost,
+          model: { reliabilityLabel: "Weak" }
+        }),
+        modelErrorSummary: { available: false, label: "No model", message: "No model was available for this product." },
         decisionLabel: "Not reliable",
         calculationSteps: [
           "No price-response model was available for this product.",
@@ -195,6 +212,10 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
     warnings.push("Predicted demand is zero at this price, so revenue and profit estimates may not be useful.");
   }
 
+  if (model.dataFitnessLabel === "Recommendation blocked") {
+    warnings.push("This simulation can be viewed as a scenario only; recommendation is blocked by the data fitness gate.");
+  }
+
   return {
     product: {
       _id: product._id,
@@ -216,6 +237,19 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
       score: round(model.reliabilityScore || 0, 0),
       reasons: model.reliabilityReasons || []
     },
+    dataFitnessScore: model.dataFitnessScore || 0,
+    dataFitnessLabel: model.dataFitnessLabel || "Recommendation blocked",
+    businessRiskLevel: model.businessRiskLevel || "High",
+    costQuality: model.costQuality || {},
+    predictionRange: buildPredictionRange({
+      demand,
+      revenue,
+      profit,
+      price: numericPrice,
+      cost: product.cost,
+      model
+    }),
+    modelErrorSummary: summarizeBacktest(model.backtestMetrics || model.accuracyMetrics),
     readinessLevel: model.readinessLevel || "Simple model ready",
     accuracyMetrics: model.accuracyMetrics || {},
     mlReadiness: model.mlReadiness || {},
@@ -257,6 +291,11 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
         max: round(model.priceRangeMax)
       },
       accuracyMetrics: model.accuracyMetrics || {},
+      backtestMetrics: model.backtestMetrics || model.accuracyMetrics || {},
+      dataFitnessScore: model.dataFitnessScore || 0,
+      dataFitnessLabel: model.dataFitnessLabel || "Recommendation blocked",
+      businessRiskLevel: model.businessRiskLevel || "High",
+      costQuality: model.costQuality || {},
       readinessLevel: model.readinessLevel || "Simple model ready",
       mlReadiness: model.mlReadiness || {}
     },

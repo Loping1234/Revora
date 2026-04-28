@@ -10,6 +10,7 @@ import {
   getRecommendationPerformance,
   getSeasonalitySummary
 } from "../services/dashboard.service.js";
+import { listImportBatches, setActiveImportBatch } from "../services/import-batch.service.js";
 import { simulatePrice } from "../services/simulation.service.js";
 
 export const analyticsRouter = Router();
@@ -47,6 +48,35 @@ analyticsRouter.get("/data-quality", async (req, res, next) => {
     res.json({
       success: true,
       data: summary
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+analyticsRouter.get("/import-batches", async (req, res, next) => {
+  try {
+    res.json({
+      success: true,
+      data: await listImportBatches()
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+analyticsRouter.put("/active-import-batch", async (req, res, next) => {
+  try {
+    const settings = await setActiveImportBatch(req.body?.importBatchId || null);
+
+    res.json({
+      success: true,
+      data: {
+        activeImportBatchId: settings.activeImportBatchId || null,
+        message: settings.activeImportBatchId
+          ? "Modeling will use the selected import batch."
+          : "Modeling will use all imported sales rows."
+      }
     });
   } catch (error) {
     next(error);

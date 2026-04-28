@@ -62,7 +62,7 @@ export function DashboardPanel({ dashboardData, dashboardState, dashboardMessage
   const trend = dashboardData?.trend || [];
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
       <section className="shrink-0 rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3 text-slate-700">
@@ -112,13 +112,13 @@ export function DashboardPanel({ dashboardData, dashboardState, dashboardMessage
           </div>
         </section>
       </div>
-    </div>
+    </section>
   );
 }
 
 export function HistoryPanel({ recommendations, historyState, historyMessage, currency, refreshHistory, handleApplyRecommendation }) {
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white p-4">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <History size={20} />
@@ -207,7 +207,7 @@ export function RecommendationPerformancePanel({ performance, state, message, cu
   const outcomes = performance?.outcomes || [];
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white p-4">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <Gauge size={20} />

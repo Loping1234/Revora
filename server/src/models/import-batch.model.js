@@ -54,6 +54,22 @@ const importBatchSchema = new mongoose.Schema(
       default: {}
     },
     datasetWarnings: [String],
+    dataFitnessScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100
+    },
+    dataFitnessLabel: {
+      type: String,
+      enum: ["Summary only", "Model usable", "Model risky", "Recommendation blocked"],
+      default: "Summary only",
+      index: true
+    },
+    costQualitySummary: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
     truncated: {
       type: Boolean,
       default: false

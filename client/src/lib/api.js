@@ -248,6 +248,23 @@ export async function getDataQualitySummary() {
   return response.json();
 }
 
+export async function setActiveImportBatch(importBatchId) {
+  const response = await fetch(`${API_BASE_URL}/analytics/active-import-batch`, {
+    method: "PUT",
+    headers: apiHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({ importBatchId })
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `Active import batch update failed with status ${response.status}`);
+  }
+
+  return payload;
+}
+
 export async function getProductIntelligence() {
   const response = await fetch(`${API_BASE_URL}/analytics/product-intelligence`, {
     headers: apiHeaders()

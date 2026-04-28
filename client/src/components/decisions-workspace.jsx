@@ -69,7 +69,7 @@ export function PriceSimulatorPanel({
   handleSimulatePrice
 }) {
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white p-4">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex items-center gap-3 text-slate-700">
         <Calculator size={20} />
         <h2 className="text-base font-semibold">Test a Price</h2>
@@ -137,7 +137,7 @@ export function PriceSimulatorPanel({
       )}
 
       {simulationResult && (
-        <div className="mt-4 grid min-h-0 flex-1 gap-3 overflow-auto pr-1">
+        <div className="mt-4 grid gap-3 pr-1">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs uppercase text-slate-500">Expected demand</p>
@@ -172,10 +172,23 @@ export function PriceSimulatorPanel({
                   {simulationResult.resultReliability?.label || "Weak"} model
                 </span>
                 {simulationResult.readinessLevel && <span className="rounded-md bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-700">{simulationResult.readinessLevel}</span>}
+                {simulationResult.dataFitnessLabel && <span className="rounded-md bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-700">{simulationResult.dataFitnessLabel}</span>}
               </div>
               {simulationResult.resultReliability?.reasons?.length > 0 && <p className="mt-2 text-sm text-slate-600">{simulationResult.resultReliability.reasons[0]}</p>}
+              {simulationResult.modelErrorSummary?.available && <p className="mt-2 text-sm text-slate-600">Backtest worst error: {Number(simulationResult.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}%</p>}
             </div>
           </div>
+
+          {simulationResult.predictionRange?.demand && (
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <p className="text-sm font-medium text-slate-900">Expected range, not just one number</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">Demand: {simulationResult.predictionRange.demand.low} to {simulationResult.predictionRange.demand.high} units</p>
+                <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">Revenue: {formatCurrency(simulationResult.predictionRange.revenue.low, currency)} to {formatCurrency(simulationResult.predictionRange.revenue.high, currency)}</p>
+                <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">Profit: {formatCurrency(simulationResult.predictionRange.profit.low, currency)} to {formatCurrency(simulationResult.predictionRange.profit.high, currency)}</p>
+              </div>
+            </div>
+          )}
 
           <div className="rounded-lg border border-slate-200 bg-white p-4">
             <p className="text-sm font-medium text-slate-900">Business explanation</p>
@@ -239,7 +252,7 @@ export function ScenarioPlannerPanel({
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white p-4">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex items-center gap-3 text-slate-700">
         <PieChart size={20} />
         <h2 className="text-base font-semibold">Scenario Planner</h2>
@@ -285,7 +298,7 @@ export function ScenarioPlannerPanel({
       {scenarioMessage && <p className={`mt-3 text-sm ${scenarioState === "success" ? "text-emerald-700" : "text-rose-700"}`}>{scenarioMessage}</p>}
 
       {scenarioResult && (
-        <div className="mt-4 grid min-h-0 flex-1 gap-4 overflow-auto">
+        <div className="mt-4 grid gap-4">
           <section className="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <p className="text-sm font-medium text-slate-900">Decision supported</p>
             <p className="mt-2 text-sm text-slate-600">{scenarioResult.decisionSupported}</p>
@@ -359,7 +372,7 @@ export function RecommendationPanel({
     : [];
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white p-4">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex items-center gap-3 text-slate-700">
         <Target size={20} />
         <h2 className="text-base font-semibold">Find the Best Price</h2>
@@ -459,7 +472,7 @@ export function RecommendationPanel({
       )}
 
       {recommendationResult && (
-        <div className="mt-4 grid min-h-0 flex-1 gap-3 overflow-auto pr-1">
+        <div className="mt-4 grid gap-3 pr-1">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs uppercase text-slate-500">Recommended price</p>
@@ -498,10 +511,24 @@ export function RecommendationPanel({
                   {recommendationResult.resultReliability?.label || "Weak"} model
                 </span>
                 {recommendationResult.readinessLevel && <span className="rounded-md bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-700">{recommendationResult.readinessLevel}</span>}
+                {recommendationResult.dataFitnessLabel && <span className="rounded-md bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-700">{recommendationResult.dataFitnessLabel}</span>}
               </div>
               {recommendationResult.resultReliability?.reasons?.length > 0 && <p className="mt-2 text-sm text-slate-600">{recommendationResult.resultReliability.reasons[0]}</p>}
+              {recommendationResult.modelErrorSummary?.available && <p className="mt-2 text-sm text-slate-600">Backtest worst error: {Number(recommendationResult.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}%</p>}
             </div>
           </div>
+
+          {recommendationResult.predictionRange?.demand && (
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <p className="text-sm font-medium text-slate-900">Recommendation range</p>
+              <p className="mt-1 text-xs text-slate-500">The app shows a likely range because pricing predictions are never exact.</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">Demand: {recommendationResult.predictionRange.demand.low} to {recommendationResult.predictionRange.demand.high} units</p>
+                <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">Revenue: {formatCurrency(recommendationResult.predictionRange.revenue.low, currency)} to {formatCurrency(recommendationResult.predictionRange.revenue.high, currency)}</p>
+                <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">Profit: {formatCurrency(recommendationResult.predictionRange.profit.low, currency)} to {formatCurrency(recommendationResult.predictionRange.profit.high, currency)}</p>
+              </div>
+            </div>
+          )}
 
           <div className="rounded-lg border border-slate-200 bg-white p-4">
             <p className="text-sm font-medium text-slate-900">Business explanation</p>

@@ -1,6 +1,20 @@
 import { Component } from "react";
 import { formatCurrency } from "../utils/formatters";
 
+function trustTone(label) {
+  const normalized = String(label || "").toLowerCase();
+
+  if (normalized.includes("recommended") || normalized.includes("usable") || normalized.includes("strong") || normalized.includes("real") || normalized.includes("low")) {
+    return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  }
+
+  if (normalized.includes("caution") || normalized.includes("risky") || normalized.includes("estimated") || normalized.includes("medium") || normalized.includes("summary")) {
+    return "border-amber-200 bg-amber-50 text-amber-800";
+  }
+
+  return "border-rose-200 bg-rose-50 text-rose-800";
+}
+
 export function StatusPill({ state }) {
   const styles = {
     checking: "border-slate-300 bg-slate-100 text-slate-700",
@@ -12,6 +26,79 @@ export function StatusPill({ state }) {
     <span className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium ${styles[state]}`}>
       {state === "online" ? "System online" : state === "offline" ? "Needs attention" : "Checking"}
     </span>
+  );
+}
+
+export function WorkspacePanel({ children, className = "" }) {
+  return (
+    <section className={`rounded-lg border border-slate-200 bg-white p-4 ${className}`}>
+      {children}
+    </section>
+  );
+}
+
+export function SectionHeader({ icon: Icon, title, description, action }) {
+  return (
+    <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex min-w-0 items-start gap-3">
+        {Icon && <Icon className="mt-0.5 shrink-0 text-slate-600" size={20} />}
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-slate-950">{title}</h2>
+          {description && <p className="mt-1 text-sm leading-5 text-slate-500">{description}</p>}
+        </div>
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+export function EmptyState({ title = "No data yet", message, action }) {
+  return (
+    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm">
+      <p className="font-semibold text-slate-900">{title}</p>
+      {message && <p className="mt-1 leading-6 text-slate-500">{message}</p>}
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+export function TrustBadge({ label, note }) {
+  if (!label && !note) return null;
+
+  return (
+    <span className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold ${trustTone(label || note)}`}>
+      {label}{note ? `: ${note}` : ""}
+    </span>
+  );
+}
+
+export function TrustStrip({ items = [] }) {
+  const visibleItems = items.filter((item) => item?.label || item?.value);
+
+  if (!visibleItems.length) return null;
+
+  return (
+    <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 xl:grid-cols-4">
+      {visibleItems.map((item) => (
+        <div key={`${item.label}-${item.value}`} className="rounded-md border border-slate-200 bg-white p-3">
+          <p className="text-xs font-medium uppercase text-slate-500">{item.label}</p>
+          <p className={`mt-1 text-sm font-semibold ${item.tone === "danger" ? "text-rose-700" : item.tone === "success" ? "text-emerald-700" : "text-slate-950"}`}>
+            {item.value}
+          </p>
+          {item.note && <p className="mt-1 text-xs text-slate-500">{item.note}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function TableFrame({ children, minWidth = "720px" }) {
+  return (
+    <div className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white">
+      <div style={{ minWidth }}>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -66,9 +153,9 @@ export function WarningPanel({ warnings, title = "Use with care" }) {
   if (!warnings?.length) return null;
 
   return (
-    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-      <p className="text-sm font-medium text-amber-900">{title}</p>
-      <div className="mt-2 grid gap-1 text-sm text-amber-800">
+    <div className="rounded-lg border border-rose-200 bg-rose-50 p-4">
+      <p className="text-sm font-medium text-rose-900">{title}</p>
+      <div className="mt-2 grid gap-1 text-sm text-rose-800">
         {warnings.map((warning) => (
           <p key={warning}>{warning}</p>
         ))}

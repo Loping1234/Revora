@@ -10,6 +10,7 @@ import { ImportBatch } from "../models/import-batch.model.js";
 import { ImportRowIssue } from "../models/import-row-issue.model.js";
 import { Product } from "../models/product.model.js";
 import { SalesData } from "../models/sales-data.model.js";
+import { setLatestImportBatchActive } from "../services/import-batch.service.js";
 import { normalizeSegmentValue } from "../utils/segments.js";
 
 const upload = multer({
@@ -479,6 +480,7 @@ async function resolveProduct({ productId, sku, productName, category, fallbackP
     category: String(category || productLabel).trim(),
     basePrice: fallbackPrice,
     cost: Number.isFinite(cost) ? cost : Number((fallbackPrice * 0.6).toFixed(2)),
+    costQuality: Number.isFinite(cost) ? "real" : "estimated",
     inventory: Number.isFinite(inventory) ? inventory : 100,
     normalizedSku: normalizeProductKey(createSku(identitySku || productLabel)),
     normalizedName: normalizeProductKey(productLabel),
@@ -587,6 +589,9 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
     let duplicateRowsSkipped = 0;
     let stockoutRowsDetected = 0;
     let promotionRowsDetected = 0;
+    let costRowsDetected = 0;
+    let zeroQuantityRowsDetected = 0;
+    let belowCostRowsDetected = 0;
 
     for (let index = 0; index < rowsToProcess.length; index += 1) {
       const rowNumber = index + 2;
@@ -675,6 +680,9 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
 
         if (isPromotion) promotionRowsDetected += 1;
         if (isStockout) stockoutRowsDetected += 1;
+        if (Number.isFinite(costField.parsed)) costRowsDetected += 1;
+        if (quantityField.parsed === 0) zeroQuantityRowsDetected += 1;
+        if (Number.isFinite(costField.parsed) && price < costField.parsed) belowCostRowsDetected += 1;
 
         const rowFingerprint = buildRowFingerprint({
           source,
@@ -796,6 +804,18 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
       datasetWarnings.push(`${promotionRowsDetected} promotional row${promotionRowsDetected === 1 ? "" : "s"} detected; promotions may affect demand.`);
     }
 
+    if (!costRowsDetected) {
+      datasetWarnings.push("No cost values were imported. Profit recommendations will be blocked unless a product has trusted cost data.");
+    }
+
+    if (belowCostRowsDetected > 0) {
+      datasetWarnings.push(`${belowCostRowsDetected} row${belowCostRowsDetected === 1 ? "" : "s"} had price below cost. Review cost or price before trusting profit.`);
+    }
+
+    if (zeroQuantityRowsDetected > rowsToProcess.length * 0.25) {
+      datasetWarnings.push("More than 25% of processed rows had zero quantity. Demand models may be weak.");
+    }
+
     const importReadiness = uniqueRecords.reduce(
       (summary, record) => {
         const productKey = String(record.productId);
@@ -816,6 +836,28 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
       },
       { ready: 0, limited: 0, notReady: 0 }
     );
+    const importDataFitnessScore = uniqueRecords.length
+      ? Math.max(0, Math.min(100, Math.round(
+        (readinessCounts.ready * 100 + readinessCounts.limited * 65 + readinessCounts.notReady * 25) /
+        Math.max(1, readinessCounts.ready + readinessCounts.limited + readinessCounts.notReady) -
+        (costRowsDetected ? 0 : 20) -
+        (belowCostRowsDetected ? 10 : 0) -
+        (stockoutRowsDetected > rowsToProcess.length * 0.25 ? 15 : 0)
+      )))
+      : 0;
+    const importDataFitnessLabel = importDataFitnessScore >= 75
+      ? "Model usable"
+      : importDataFitnessScore >= 50
+        ? "Model risky"
+        : readinessCounts.ready + readinessCounts.limited > 0
+          ? "Recommendation blocked"
+          : "Summary only";
+    const costQualitySummary = {
+      label: costRowsDetected ? (belowCostRowsDetected ? "inconsistent" : "real") : "missing",
+      costRows: costRowsDetected,
+      coveragePercent: rowsToProcess.length ? Number(((costRowsDetected / rowsToProcess.length) * 100).toFixed(1)) : 0,
+      belowCostRows: belowCostRowsDetected
+    };
 
     const responseBase = {
       totalRows,
@@ -844,6 +886,9 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
       productsNotReady: readinessCounts.notReady,
       productsWithModelReadyData: readinessCounts.ready + readinessCounts.limited,
       productsWithSummaryOnlyData: readinessCounts.notReady,
+      dataFitnessScore: importDataFitnessScore,
+      dataFitnessLabel: importDataFitnessLabel,
+      costQualitySummary,
       truncated,
       detectedColumns: mapping.detectedColumns,
       mappedFields: mapping.mappedFields,
@@ -875,6 +920,9 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
       segmentCounts,
       conflicts,
       datasetWarnings,
+      dataFitnessScore: importDataFitnessScore,
+      dataFitnessLabel: importDataFitnessLabel,
+      costQualitySummary,
       completedAt: new Date()
     };
 
@@ -905,6 +953,7 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
     for (let index = 0; index < uniqueRecords.length; index += INSERT_BATCH_SIZE) {
       await SalesData.insertMany(uniqueRecords.slice(index, index + INSERT_BATCH_SIZE), { ordered: false });
     }
+    await setLatestImportBatchActive(importBatch._id);
 
     res.status(201).json({
       success: true,

@@ -24,6 +24,7 @@ import {
   mergeProducts,
   planScenarios,
   resetWorkspaceData,
+  setActiveImportBatch,
   simulatePrice,
   updateWorkspaceSettings,
   uploadSalesCsv
@@ -201,6 +202,24 @@ export function AuthenticatedApp({ session, onLogout }) {
       setDataQuality(payload.data);
       setDataQualityState("success");
       setDataQualityMessage("");
+    } catch (err) {
+      setDataQualityState("error");
+      setDataQualityMessage(err.message);
+    }
+  }
+
+  async function handleSetActiveImportBatch(importBatchId) {
+    setDataQualityState("loading");
+    setDataQualityMessage("Updating the active modeling dataset.");
+
+    try {
+      await setActiveImportBatch(importBatchId);
+      await Promise.all([refreshDataQuality(), refreshReadiness()]);
+      setLatestModel(null);
+      setSimulationResult(null);
+      setRecommendationResult(null);
+      setDataQualityState("success");
+      setDataQualityMessage(importBatchId ? "Selected import batch is now used for modeling." : "All imported sales rows are now used for modeling.");
     } catch (err) {
       setDataQualityState("error");
       setDataQualityMessage(err.message);
@@ -784,6 +803,7 @@ export function AuthenticatedApp({ session, onLogout }) {
                 <DataQualityPanel
                   currency={currency}
                   dataQuality={dataQuality}
+                  handleSetActiveImportBatch={handleSetActiveImportBatch}
                   message={dataQualityMessage}
                   refreshDataQuality={refreshDataQuality}
                   state={dataQualityState}
@@ -1074,6 +1094,7 @@ export function AuthenticatedApp({ session, onLogout }) {
         <DataQualityPanel
           currency={currency}
           dataQuality={dataQuality}
+          handleSetActiveImportBatch={handleSetActiveImportBatch}
           message={dataQualityMessage}
           refreshDataQuality={refreshDataQuality}
           state={dataQualityState}
@@ -1369,13 +1390,13 @@ export function AuthenticatedApp({ session, onLogout }) {
   ]);
 
   return (
-    <main className={`min-h-screen bg-slate-50 text-slate-950 ${settings.appearanceMode === "dark" ? "theme-dark" : ""}`}>
+    <main className={`h-screen overflow-hidden bg-slate-50 text-slate-950 ${settings.appearanceMode === "dark" ? "theme-dark" : ""}`}>
       {isSidebarOpen && <div className="fixed inset-0 z-20 bg-slate-950/30 lg:hidden" onClick={() => setIsSidebarOpen(false)} />}
 
-      <div className="grid min-h-screen lg:grid-cols-[288px_1fr]">
+      <div className="grid h-screen min-h-0 lg:grid-cols-[288px_1fr]">
         <Sidebar activePanel={activePanel} isOpen={isSidebarOpen} setActivePanel={setActivePanel} setIsOpen={setIsSidebarOpen} settings={settings} />
 
-        <section className="flex min-w-0 flex-col px-5 py-4 sm:px-8 lg:min-h-screen lg:px-8">
+        <section className="flex h-screen min-w-0 flex-col overflow-hidden px-5 py-4 sm:px-8 lg:px-8">
           <header className="shrink-0 flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-start gap-3">
               <button
@@ -1420,7 +1441,7 @@ export function AuthenticatedApp({ session, onLogout }) {
             </div>
           </header>
 
-          <div className="mt-4 min-h-0 flex-1">{panelContent}</div>
+          <div className="mt-4 min-h-0 flex-1 overflow-hidden pr-1">{panelContent}</div>
         </section>
       </div>
     </main>

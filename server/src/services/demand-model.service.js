@@ -1,5 +1,8 @@
 import { DemandModel } from "../models/demand-model.model.js";
+import { Product } from "../models/product.model.js";
 import { SalesData } from "../models/sales-data.model.js";
+import { assessDataFitness, buildPredictionRange, summarizeBacktest } from "./data-fitness.service.js";
+import { getActiveImportBatchFilter } from "./import-batch.service.js";
 import { isValidSegment } from "../utils/segments.js";
 
 export function isSupportedSegment(segment) {
@@ -562,10 +565,15 @@ function assessReadinessGate({ rawRecords, usableRecords, groupedRecords, traini
 }
 
 export async function getInsightSummary({ productId, segment = "all" }) {
-  const query = segment === "all" ? { productId } : { productId, customerSegment: segment };
-  const [summary, groupedRecords] = await Promise.all([
+  const activeImportBatchFilter = await getActiveImportBatchFilter();
+  const query = {
+    ...(segment === "all" ? { productId } : { productId, customerSegment: segment }),
+    ...activeImportBatchFilter
+  };
+  const [summary, groupedRecords, product] = await Promise.all([
     getSalesSummaryMetrics(query),
-    getGroupedDemandRecords(query)
+    getGroupedDemandRecords(query),
+    Product.findById(productId).lean()
   ]);
   const distinctPriceCount = new Set(groupedRecords.map((record) => Number(record.price).toFixed(4))).size;
   const canFitModel = groupedRecords.length >= 3 && distinctPriceCount >= 2;
@@ -579,6 +587,13 @@ export async function getInsightSummary({ productId, segment = "all" }) {
     distinctPriceCount
   });
   const resultMode = canFitModel ? readiness.readinessLevel : canShowSummary ? "Business Summary Only" : "Insufficient Data";
+  const dataFitness = assessDataFitness({
+    product,
+    summary,
+    groupedRecords,
+    distinctPriceCount,
+    excludedRows: summary.rawRows - summary.usableRows
+  });
 
   return {
     resultMode,
@@ -587,11 +602,18 @@ export async function getInsightSummary({ productId, segment = "all" }) {
     mlReadiness: readiness.mlReadiness,
     canFitModel,
     canShowSummary,
+    activeImportBatchId: activeImportBatchFilter.importBatchId || null,
+    dataFitnessScore: dataFitness.dataFitnessScore,
+    dataFitnessLabel: canFitModel ? dataFitness.dataFitnessLabel : "Summary only",
+    businessRiskLevel: dataFitness.businessRiskLevel,
+    costQuality: dataFitness.costQuality,
     blockingReasons: canFitModel ? [] : getBlockingReasons({
       groupedDemandPoints: groupedRecords.length,
       distinctPriceCount,
       usableRows: summary.usableRows
     }),
+    blockedReasons: dataFitness.blockedReasons,
+    dataFitnessWarnings: dataFitness.dataFitnessWarnings,
     suggestedNextData: canFitModel ? "This product has enough data for price response modeling." : "Add at least 3 sales dates with 2 or more different prices for this product/customer group.",
     summaryMetrics: {
       rawRows: summary.rawRows,
@@ -1121,12 +1143,24 @@ export async function fitDemandModel({ productId, segment = "all" }) {
     throw new Error("segment must be all or an imported customer group");
   }
 
-  const query = segment === "all" ? { productId } : { productId, customerSegment: segment };
-  const [{ rawRows, usableRows, excludedRows }, groupedRecords] = await Promise.all([
-    getDemandRecordCounts(query),
-    getGroupedDemandRecords(query)
+  const activeImportBatchFilter = await getActiveImportBatchFilter();
+  const query = {
+    ...(segment === "all" ? { productId } : { productId, customerSegment: segment }),
+    ...activeImportBatchFilter
+  };
+  const [summary, groupedRecords, product] = await Promise.all([
+    getSalesSummaryMetrics(query),
+    getGroupedDemandRecords(query),
+    Product.findById(productId).lean()
   ]);
+  const rawRows = summary.rawRows || 0;
+  const usableRows = summary.usableRows || 0;
+  const excludedRows = rawRows - usableRows;
   const distinctPriceCount = new Set(groupedRecords.map((record) => Number(record.price).toFixed(4))).size;
+
+  if (!product) {
+    throw new Error("Product not found");
+  }
 
   if (groupedRecords.length < 3 || distinctPriceCount < 2) {
     const summary = await getInsightSummary({ productId, segment });
@@ -1191,6 +1225,26 @@ export async function fitDemandModel({ productId, segment = "all" }) {
     excludedRows,
     distinctPriceCount
   });
+  const dataFitness = assessDataFitness({
+    product,
+    summary,
+    groupedRecords,
+    distinctPriceCount,
+    model: coefficients,
+    accuracyMetrics,
+    excludedRows
+  });
+  const averageDemandPrediction = Math.max(0, predictDemandFromModel(coefficients, trainingSummary.averagePrice || product.basePrice));
+  const averageRevenuePrediction = (trainingSummary.averagePrice || product.basePrice) * averageDemandPrediction;
+  const averageProfitPrediction = ((trainingSummary.averagePrice || product.basePrice) - product.cost) * averageDemandPrediction;
+  const predictionIntervals = buildPredictionRange({
+    demand: averageDemandPrediction,
+    revenue: averageRevenuePrediction,
+    profit: averageProfitPrediction,
+    price: trainingSummary.averagePrice || product.basePrice,
+    cost: product.cost,
+    model: { ...coefficients, ...reliability, accuracyMetrics }
+  });
   const aggregationSummary = {
     rawRowsUsed: usableRows,
     rawRowsExcluded: excludedRows,
@@ -1223,6 +1277,15 @@ export async function fitDemandModel({ productId, segment = "all" }) {
       distinctPriceCount,
       ...reliability,
       aggregationSummary,
+      activeImportBatchId: activeImportBatchFilter.importBatchId || null,
+      dataFitnessScore: dataFitness.dataFitnessScore,
+      dataFitnessLabel: dataFitness.dataFitnessLabel,
+      businessRiskLevel: dataFitness.businessRiskLevel,
+      costQuality: dataFitness.costQuality,
+      backtestMetrics: accuracyMetrics,
+      predictionIntervals,
+      blockedReasons: dataFitness.blockedReasons,
+      dataFitnessWarnings: dataFitness.dataFitnessWarnings,
       excludedRows,
       priceRangeMin: trainingSummary.priceRangeMin,
       priceRangeMax: trainingSummary.priceRangeMax,
@@ -1242,6 +1305,8 @@ export async function fitDemandModel({ productId, segment = "all" }) {
   return {
     ...model,
     resultMode: "Price Response Model",
-    warnings: getDemandModelWarnings(model)
+    backtestMetrics: model.backtestMetrics || model.accuracyMetrics,
+    modelErrorSummary: summarizeBacktest(model.backtestMetrics || model.accuracyMetrics),
+    warnings: [...getDemandModelWarnings(model), ...(model.dataFitnessWarnings || [])]
   };
 }

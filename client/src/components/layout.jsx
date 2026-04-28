@@ -54,7 +54,7 @@ import {
 export function Sidebar({ activePanel, setActivePanel, isOpen, setIsOpen, settings }) {
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-30 w-72 overflow-y-auto border-r border-slate-200 bg-white px-4 py-5 transition-transform lg:static lg:h-screen lg:w-72 lg:translate-x-0 ${
+      className={`fixed inset-y-0 left-0 z-30 w-72 overflow-y-auto border-r border-slate-200 bg-white px-4 py-5 transition-transform lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:translate-x-0 ${
         isOpen ? "translate-x-0" : "-translate-x-full"
       }`}
     >
@@ -136,14 +136,14 @@ export function WorkspaceTabs({ tabs }) {
           ))}
         </div>
       </div>
-      <div>{active?.content}</div>
+      <div className="mt-4 min-h-0 flex-1 overflow-hidden pr-1">{active?.content}</div>
     </div>
   );
 }
 
 export function PlaceholderPanel({ icon: Icon, title, primary, secondary }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-6">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-6">
       <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-slate-950 text-white">
         <Icon size={20} />
       </div>

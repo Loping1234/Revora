@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { DemandModel } from "../models/demand-model.model.js";
+import { ImportBatch } from "../models/import-batch.model.js";
 import { Product } from "../models/product.model.js";
 import { RecommendationOutcome } from "../models/recommendation-outcome.model.js";
 import { Recommendation } from "../models/recommendation.model.js";
@@ -260,7 +261,10 @@ export async function buildProductsWorkbook() {
 
 export async function buildSalesDataWorkbook(source) {
   const query = source ? { "importMeta.source": source } : {};
-  const rows = await SalesData.find(query).sort({ createdAt: -1 }).limit(5000).lean();
+  const [rows, batch] = await Promise.all([
+    SalesData.find(query).sort({ createdAt: -1 }).limit(5000).lean(),
+    source ? ImportBatch.findOne({ source }).sort({ createdAt: -1 }).lean() : null
+  ]);
   const workbook = createWorkbook("Sales Data Report");
   const summary = workbook.addWorksheet("Summary");
   const products = new Set(rows.map((row) => String(row.productId)));
@@ -275,8 +279,14 @@ export async function buildSalesDataWorkbook(source) {
     ["Units sold", units],
     ["Revenue", round(revenue)],
     ["Average price", units ? round(revenue / units) : 0],
+    ["Data fitness", batch?.dataFitnessLabel || "Not scored"],
+    ["Fitness score", batch?.dataFitnessScore ?? ""],
+    ["Cost quality", batch?.costQualitySummary?.label || ""],
     ["Source", source || "All imports"]
   ]);
+  if (batch?.datasetWarnings?.length) {
+    addTable(workbook.addWorksheet("Warnings"), ["Warning"], batch.datasetWarnings.map((warning) => [warning]));
+  }
   addTable(workbook.addWorksheet("Imported Rows"), ["Date", "Product", "SKU", "External ID", "Category", "Segment", "Price", "Quantity", "Revenue", "Cost", "Region", "Channel", "Promotion", "Source Row"], rows.map((row) => [
     row.date?.toISOString?.().slice(0, 10),
     row.productSnapshot?.name,
@@ -301,11 +311,15 @@ export async function buildPricingInsightsWorkbook() {
   const workbook = createWorkbook("Pricing Insights Report");
   const sheet = workbook.addWorksheet("Pricing Insights");
   addTitle(sheet, "Pricing Insights Report", "Fitted demand models with reliability, formulas, and warnings.");
-  addTable(sheet, ["Product", "SKU", "Segment", "Readiness", "Model", "Reliability", "Score", "Grouped Points", "Raw Rows", "Distinct Prices", "Confidence", "Demand Error %", "Revenue Error %", "Profit Error %", "ML Ready", "Formula", "Warnings"], models.map((model) => [
+  addTable(sheet, ["Product", "SKU", "Segment", "Readiness", "Data Fitness", "Fitness Score", "Cost Quality", "Business Risk", "Model", "Reliability", "Score", "Grouped Points", "Raw Rows", "Distinct Prices", "Confidence", "Demand Error %", "Revenue Error %", "Profit Error %", "ML Ready", "Formula", "Blocked Reasons", "Warnings"], models.map((model) => [
     model.productId?.name,
     model.productId?.sku,
     model.segment,
     model.readinessLevel,
+    model.dataFitnessLabel,
+    model.dataFitnessScore,
+    model.costQuality?.label,
+    model.businessRiskLevel,
     model.modelType,
     model.reliabilityLabel,
     model.reliabilityScore,
@@ -313,12 +327,13 @@ export async function buildPricingInsightsWorkbook() {
     model.rawRowsUsed,
     model.distinctPriceCount,
     model.rSquared,
-    model.accuracyMetrics?.available ? model.accuracyMetrics.demandMAPE : "",
-    model.accuracyMetrics?.available ? model.accuracyMetrics.revenueMAPE : "",
-    model.accuracyMetrics?.available ? model.accuracyMetrics.profitMAPE : "",
+    (model.backtestMetrics || model.accuracyMetrics)?.available ? (model.backtestMetrics || model.accuracyMetrics).demandMAPE : "",
+    (model.backtestMetrics || model.accuracyMetrics)?.available ? (model.backtestMetrics || model.accuracyMetrics).revenueMAPE : "",
+    (model.backtestMetrics || model.accuracyMetrics)?.available ? (model.backtestMetrics || model.accuracyMetrics).profitMAPE : "",
     model.mlReadiness?.ready ? "Yes" : "No",
     model.formulaText,
-    [...(model.modelWarnings || []), ...(model.reliabilityReasons || [])].join(" | ")
+    (model.blockedReasons || []).join(" | "),
+    [...(model.modelWarnings || []), ...(model.reliabilityReasons || []), ...(model.dataFitnessWarnings || [])].join(" | ")
   ]));
   return finalizeWorkbook(workbook);
 }
@@ -329,21 +344,27 @@ export async function buildRecommendationsWorkbook(historyOnly = false) {
   const workbook = createWorkbook(historyOnly ? "Recommendation History Report" : "Recommendations Report");
   const sheet = workbook.addWorksheet(historyOnly ? "History" : "Recommendations");
   addTitle(sheet, historyOnly ? "Recommendation History Report" : "Recommendations Report", "Saved pricing recommendations with assumptions and explanations.");
-  addTable(sheet, ["Created At", "Product", "SKU", "Category", "Goal", "Status", "Decision", "Optimizer", "Recommended Price", "Demand", "Revenue", "Profit", "Change %", "Reliability", "Warnings", "Explanation"], recommendations.map((item) => [
+  addTable(sheet, ["Created At", "Product", "SKU", "Category", "Goal", "Status", "Recommendation Status", "Decision", "Business Risk", "Optimizer", "Recommended Price", "Safe Band", "Demand Range", "Revenue Range", "Profit Range", "Revenue", "Profit", "Change %", "Reliability", "Backtest Error", "Warnings", "Explanation"], recommendations.map((item) => [
     item.createdAt?.toISOString?.(),
     item.productId?.name,
     item.productId?.sku,
     item.productId?.category,
     item.objective,
     item.status || "Draft",
+    item.recommendationStatus,
     item.decisionLabel,
+    item.businessRiskLevel,
     item.optimizationMethod,
     item.recommendedPrice,
-    item.expectedDemand,
+    item.safePriceBand ? `${item.safePriceBand.min} to ${item.safePriceBand.max}` : "",
+    item.predictionRange?.demand ? `${item.predictionRange.demand.low} to ${item.predictionRange.demand.high}` : item.expectedDemand,
+    item.predictionRange?.revenue ? `${item.predictionRange.revenue.low} to ${item.predictionRange.revenue.high}` : item.expectedRevenue,
+    item.predictionRange?.profit ? `${item.predictionRange.profit.low} to ${item.predictionRange.profit.high}` : item.expectedProfit,
     item.expectedRevenue,
     item.expectedProfit,
     item.improvementPercent,
     item.resultReliability?.label || item.confidence,
+    item.modelErrorSummary?.available ? item.modelErrorSummary.worstErrorPercent : "",
     [...(item.warnings || []), ...(item.guardrailWarnings || [])].join(" | "),
     item.explanation
   ]));
@@ -397,8 +418,8 @@ export async function buildExaminerWorkbook() {
     ["Recommendations", dashboard.metrics.recommendationCount]
   ]);
   addTable(workbook.addWorksheet("Products"), ["Product", "SKU", "Revenue", "Readiness", "Reason"], products.map((product) => [product.name, product.sku, round(product.revenue), product.readiness.status, product.readiness.reason]));
-  addTable(workbook.addWorksheet("Pricing Insights"), ["Product", "Readiness", "Model", "Reliability", "Demand Error %", "ML Ready", "Formula", "Warnings"], models.map((model) => [model.productId?.name, model.readinessLevel, model.modelType, model.reliabilityLabel, model.accuracyMetrics?.available ? model.accuracyMetrics.demandMAPE : "", model.mlReadiness?.ready ? "Yes" : "No", model.formulaText, [...(model.modelWarnings || []), ...(model.reliabilityReasons || [])].join(" | ")]));
-  addTable(workbook.addWorksheet("Recommendations"), ["Product", "Goal", "Status", "Decision", "Optimizer", "Recommended Price", "Revenue", "Profit", "Explanation"], recommendations.map((item) => [item.productId?.name, item.objective, item.status || "Draft", item.decisionLabel, item.optimizationMethod, item.recommendedPrice, item.expectedRevenue, item.expectedProfit, item.explanation]));
+  addTable(workbook.addWorksheet("Pricing Insights"), ["Product", "Readiness", "Data Fitness", "Cost Quality", "Model", "Reliability", "Demand Error %", "ML Ready", "Formula", "Warnings"], models.map((model) => [model.productId?.name, model.readinessLevel, model.dataFitnessLabel, model.costQuality?.label, model.modelType, model.reliabilityLabel, (model.backtestMetrics || model.accuracyMetrics)?.available ? (model.backtestMetrics || model.accuracyMetrics).demandMAPE : "", model.mlReadiness?.ready ? "Yes" : "No", model.formulaText, [...(model.modelWarnings || []), ...(model.reliabilityReasons || []), ...(model.dataFitnessWarnings || [])].join(" | ")]));
+  addTable(workbook.addWorksheet("Recommendations"), ["Product", "Goal", "Status", "Recommendation Status", "Decision", "Business Risk", "Optimizer", "Recommended Price", "Safe Band", "Revenue Range", "Profit Range", "Explanation"], recommendations.map((item) => [item.productId?.name, item.objective, item.status || "Draft", item.recommendationStatus, item.decisionLabel, item.businessRiskLevel, item.optimizationMethod, item.recommendedPrice, item.safePriceBand ? `${item.safePriceBand.min} to ${item.safePriceBand.max}` : "", item.predictionRange?.revenue ? `${item.predictionRange.revenue.low} to ${item.predictionRange.revenue.high}` : item.expectedRevenue, item.predictionRange?.profit ? `${item.predictionRange.profit.low} to ${item.predictionRange.profit.high}` : item.expectedProfit, item.explanation]));
   addTable(workbook.addWorksheet("Recommendation Outcomes"), ["Product", "Status", "Applied Price", "Expected Profit", "Actual Profit", "Prediction Error %", "Profit Lift", "Target Hit"], outcomes.map((item) => [item.productId?.name, item.status, item.appliedPrice, item.expectedProfit, item.actualProfit, item.predictionError, item.profitLift, item.targetHit ? "Yes" : "No"]));
   addTable(workbook.addWorksheet("Product Matching"), ["Master Product", "Master SKU", "Possible Duplicate", "Duplicate SKU", "Category", "Shared ID", "Name Match %", "Token Overlap %", "Shared Tokens", "Price Similarity %", "Review Score %", "Decision"], findPotentialProductDuplicates(products), {
     title: "Product matching review. Price/category similarity alone is not enough to identify duplicates."

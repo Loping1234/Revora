@@ -60,7 +60,7 @@ export function SalesDataPanel({ handleUpload, handleDownloadPanelReport, select
   const datasetWarnings = uploadSummary?.datasetWarnings || [];
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex items-center gap-3 text-slate-700">
         <Upload size={20} />
         <h2 className="text-base font-semibold">Import Sales History</h2>
@@ -163,6 +163,21 @@ export function SalesDataPanel({ handleUpload, handleDownloadPanelReport, select
             </div>
           </div>
 
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-md border border-slate-200 bg-white p-3">
+              <p className="text-xs uppercase text-slate-500">Data fitness</p>
+              <p className="mt-1 text-sm font-semibold">{uploadSummary.dataFitnessLabel || "Not scored"} ({uploadSummary.dataFitnessScore ?? 0}/100)</p>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white p-3">
+              <p className="text-xs uppercase text-slate-500">Cost quality</p>
+              <p className="mt-1 text-sm font-semibold">{uploadSummary.costQualitySummary?.label || "Unknown"}</p>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white p-3">
+              <p className="text-xs uppercase text-slate-500">Active for modeling</p>
+              <p className="mt-1 text-sm font-semibold">Latest upload selected</p>
+            </div>
+          </div>
+
           {(datasetWarnings.length > 0 || optionalFields.length > 0) && (
             <div className="mt-4 rounded-md border border-slate-200 bg-white p-3">
               <p className="text-xs font-medium uppercase text-slate-500">Data quality notes</p>
@@ -256,13 +271,15 @@ export function SalesDataPanel({ handleUpload, handleDownloadPanelReport, select
   );
 }
 
-export function DataQualityPanel({ dataQuality, state, message, refreshDataQuality, currency }) {
+export function DataQualityPanel({ dataQuality, state, message, refreshDataQuality, handleSetActiveImportBatch, currency }) {
   const overview = dataQuality?.overview || {};
   const readiness = dataQuality?.readiness || {};
   const warnings = dataQuality?.warnings || [];
+  const importBatches = dataQuality?.importBatches || [];
+  const activeImportBatchId = dataQuality?.activeImportBatchId ? String(dataQuality.activeImportBatchId) : "";
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white p-4">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <Gauge size={20} />
@@ -281,6 +298,40 @@ export function DataQualityPanel({ dataQuality, state, message, refreshDataQuali
         <SummaryCard icon={X} label="Summary Only" value={formatNumber(readiness.notReadyCombinations || 0)} note="Useful, but no model yet" />
         <SummaryCard icon={BadgeDollarSign} label="Competitor Coverage" value={formatPercent(overview.competitorCoveragePercent || 0)} note={`${formatPercent(overview.costCoveragePercent || 0)} cost coverage`} />
       </div>
+
+      <section className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Active modeling dataset</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Recommendations use the selected import batch. This prevents old bad uploads from silently polluting model results.
+            </p>
+          </div>
+          <button
+            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700"
+            disabled={!handleSetActiveImportBatch}
+            onClick={() => handleSetActiveImportBatch?.(null)}
+            type="button"
+          >
+            Use all imports
+          </button>
+        </div>
+        <div className="mt-3 grid gap-2 lg:grid-cols-3">
+          {importBatches.slice(0, 6).map((batch) => (
+            <button
+              className={`rounded-md border p-3 text-left text-sm ${String(batch._id) === activeImportBatchId ? "border-emerald-300 bg-emerald-50 text-emerald-950" : "border-slate-200 bg-white text-slate-700"}`}
+              key={batch._id}
+              onClick={() => handleSetActiveImportBatch?.(batch._id)}
+              type="button"
+            >
+              <span className="block truncate font-semibold">{batch.source}</span>
+              <span className="mt-1 block text-xs">{formatNumber(batch.rowCounts?.importedRows || 0)} rows imported - {batch.dataFitnessLabel || "Not scored"}</span>
+              {String(batch._id) === activeImportBatchId && <span className="mt-2 inline-flex rounded-md bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-800">Active</span>}
+            </button>
+          ))}
+          {!importBatches.length && <p className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-500">No import batches available yet.</p>}
+        </div>
+      </section>
 
       <div className="mt-4 grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-2">
         <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -351,7 +402,7 @@ export function ProductMatchingPanel({ duplicatesData, duplicatesState, duplicat
   const duplicates = duplicatesData?.duplicates || [];
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white p-4">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <GitBranch size={20} />

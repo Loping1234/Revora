@@ -1,7 +1,9 @@
 import { DemandModel } from "../models/demand-model.model.js";
 import { Product } from "../models/product.model.js";
 import { Recommendation } from "../models/recommendation.model.js";
+import { buildPredictionRange, summarizeBacktest } from "./data-fitness.service.js";
 import { fitDemandModel, isSupportedSegment } from "./demand-model.service.js";
+import { getActiveImportBatchId } from "./import-batch.service.js";
 import { calculatePriceOutcome, getConfidenceLabel, getModelWarnings, getResultDecisionLabel, round } from "./simulation.service.js";
 import { formatSegmentLabel } from "../utils/segments.js";
 
@@ -235,8 +237,10 @@ export async function recommendPrice({ productId, segment = "all", objective = "
   }
 
   let model = await DemandModel.findOne({ productId, segment }).lean();
+  const activeImportBatchId = await getActiveImportBatchId();
+  const modelImportBatchId = model?.activeImportBatchId ? String(model.activeImportBatchId) : null;
 
-  if (!model) {
+  if (!model || modelImportBatchId !== (activeImportBatchId || null) || !model.dataFitnessLabel) {
     model = await fitDemandModel({ productId, segment });
   }
 
@@ -248,6 +252,16 @@ export async function recommendPrice({ productId, segment = "all", objective = "
 
   if ((model.reliabilityLabel || "Weak") === "Weak") {
     throw new Error("Best Price Recommendation is blocked because model reliability is weak. Use Pricing Insights to review missing data and treat this product as summary-only until more price variation is available.");
+  }
+
+  if ((model.dataFitnessLabel || "Recommendation blocked") === "Recommendation blocked") {
+    throw new Error(`Best Price Recommendation is blocked because the data fitness gate failed: ${(model.blockedReasons || []).join(" ") || "the uploaded data is not safe enough for pricing decisions."}`);
+  }
+
+  const modelErrorSummary = summarizeBacktest(model.backtestMetrics || model.accuracyMetrics);
+
+  if (modelErrorSummary.available && modelErrorSummary.worstErrorPercent > 35) {
+    throw new Error(`Best Price Recommendation is blocked because backtesting error is too high (${modelErrorSummary.worstErrorPercent}%).`);
   }
 
   const defaults = defaultRangeForProduct(product);
@@ -266,6 +280,19 @@ export async function recommendPrice({ productId, segment = "all", objective = "
 
   if (numericCompetitorPrice !== undefined && (!Number.isFinite(numericCompetitorPrice) || numericCompetitorPrice < 0)) {
     throw new Error("Competitor price must be a non-negative number");
+  }
+
+  const costQualityLabel = model.costQuality?.label || product.costQuality || "real";
+  if (["profit", "clear_inventory"].includes(objective) && costQualityLabel !== "real") {
+    throw new Error(`Profit-based recommendations are blocked because cost quality is ${costQualityLabel}. Upload real cost values before trusting profit optimization.`);
+  }
+
+  if (Number.isFinite(model.priceRangeMin) && numericMinPrice < model.priceRangeMin * 0.75) {
+    throw new Error("Recommendation range is more than 25% below historical prices. Narrow the range to stay inside a defensible business band.");
+  }
+
+  if (Number.isFinite(model.priceRangeMax) && numericMaxPrice > model.priceRangeMax * 1.25) {
+    throw new Error("Recommendation range is more than 25% above historical prices. Narrow the range to stay inside a defensible business band.");
   }
 
   const range = numericMaxPrice - numericMinPrice;
@@ -386,6 +413,20 @@ export async function recommendPrice({ productId, segment = "all", objective = "
     warnings.push("The recommended scenario still has negative expected profit.");
   }
 
+  const predictionRange = buildPredictionRange({
+    demand: best.expectedDemand,
+    revenue: best.expectedRevenue,
+    profit: best.expectedProfit,
+    price: best.price,
+    cost: product.cost,
+    model
+  });
+  const recommendationStatus = decisionLabel === "Recommended"
+    ? "recommended"
+    : decisionLabel === "Use with caution"
+      ? "use_with_caution"
+      : "not_enough_evidence";
+
   const recommendationPayload = {
     productId,
     segment,
@@ -437,6 +478,14 @@ export async function recommendPrice({ productId, segment = "all", objective = "
     testedPriceCount: testedPrices.length,
     goodPriceRange,
     avoidPriceRange,
+    safePriceBand: goodPriceRange,
+    predictionRange,
+    recommendationStatus,
+    businessRiskLevel: model.businessRiskLevel || "High",
+    modelErrorSummary,
+    dataFitnessScore: model.dataFitnessScore || 0,
+    dataFitnessLabel: model.dataFitnessLabel || "Recommendation blocked",
+    costQuality: model.costQuality || { label: costQualityLabel },
     calculationSteps: [
       `Tested ${testedPrices.length} prices from ${round(effectiveMinPrice)} to ${round(numericMaxPrice)} using a ${round(numericStep)} step.`,
       `Optimization method: ${optimizationMethod.replace("_", " ")}.`,

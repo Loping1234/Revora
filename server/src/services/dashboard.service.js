@@ -3,6 +3,7 @@ import { Product } from "../models/product.model.js";
 import { Recommendation } from "../models/recommendation.model.js";
 import { getRecommendationPerformance } from "./recommendation-outcome.service.js";
 import { SalesData } from "../models/sales-data.model.js";
+import { getActiveImportBatchFilter, listImportBatches } from "./import-batch.service.js";
 import { formatSegmentLabel } from "../utils/segments.js";
 
 function round(value, digits = 2) {
@@ -184,6 +185,7 @@ export async function getDashboardSummary() {
 
 export async function getDataQualitySummary() {
   const readiness = await getInsightReadiness();
+  const importBatches = await listImportBatches();
   const revenueExpression = { $ifNull: ["$revenue", { $multiply: ["$price", "$quantity"] }] };
   const [overview, sources, optional, segments] = await Promise.all([
     SalesData.aggregate([
@@ -275,6 +277,8 @@ export async function getDataQualitySummary() {
       rows: item.rows,
       revenue: round(item.revenue)
     })),
+    importBatches: importBatches.batches,
+    activeImportBatchId: importBatches.activeImportBatchId,
     optionalValues: {
       regions: (optionalBase.regions || []).filter(Boolean),
       channels: (optionalBase.channels || []).filter(Boolean),
@@ -674,7 +678,9 @@ export function assessReadinessSummary(summary) {
 }
 
 export async function getInsightReadiness() {
+  const activeImportBatchFilter = await getActiveImportBatchFilter();
   const rows = await SalesData.aggregate([
+    { $match: activeImportBatchFilter },
     {
       $group: {
         _id: {

@@ -259,6 +259,43 @@ const recommendationSchema = new mongoose.Schema(
       score: Number,
       reasons: [String]
     },
+    recommendationStatus: {
+      type: String,
+      enum: ["recommended", "use_with_caution", "not_enough_evidence"],
+      default: "use_with_caution",
+      index: true
+    },
+    safePriceBand: {
+      min: Number,
+      max: Number
+    },
+    predictionRange: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    businessRiskLevel: {
+      type: String,
+      enum: ["Low", "Medium", "High"],
+      default: "High"
+    },
+    modelErrorSummary: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    dataFitnessScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100
+    },
+    dataFitnessLabel: {
+      type: String,
+      default: ""
+    },
+    costQuality: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
     explanation: {
       type: String,
       required: true

@@ -152,6 +152,50 @@ const demandModelSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: {}
     },
+    activeImportBatchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ImportBatch",
+      index: true
+    },
+    dataFitnessScore: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+      max: 100
+    },
+    dataFitnessLabel: {
+      type: String,
+      enum: ["Summary only", "Model usable", "Model risky", "Recommendation blocked"],
+      required: true,
+      default: "Recommendation blocked",
+      index: true
+    },
+    businessRiskLevel: {
+      type: String,
+      enum: ["Low", "Medium", "High"],
+      default: "High"
+    },
+    costQuality: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    backtestMetrics: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    predictionIntervals: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    blockedReasons: {
+      type: [String],
+      default: []
+    },
+    dataFitnessWarnings: {
+      type: [String],
+      default: []
+    },
     excludedRows: {
       type: Number,
       required: true,

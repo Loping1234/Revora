@@ -4,6 +4,7 @@ import { ImportBatch } from "../models/import-batch.model.js";
 import { ImportRowIssue } from "../models/import-row-issue.model.js";
 import { Product } from "../models/product.model.js";
 import { SalesData } from "../models/sales-data.model.js";
+import { setLatestImportBatchActive } from "../services/import-batch.service.js";
 
 export const ingestRouter = Router();
 
@@ -107,6 +108,7 @@ async function resolveApiProduct({ sku, externalProductId, productName, category
     category: category || "Uncategorized",
     basePrice: price,
     cost: Number.isFinite(cost) ? cost : Math.max(0, price * 0.65),
+    costQuality: Number.isFinite(cost) ? "real" : "estimated",
     inventory: Number.isFinite(inventory) ? inventory : 0
   });
 }
@@ -128,6 +130,9 @@ ingestRouter.post("/sales", async (req, res, next) => {
     const rowIssues = [];
     const seenFingerprints = new Set();
     const productsDetected = new Set();
+    let costRowsDetected = 0;
+    let belowCostRowsDetected = 0;
+    let stockoutRowsDetected = 0;
     const importBatch = await ImportBatch.create({
       source,
       status: "processing",
@@ -177,6 +182,9 @@ ingestRouter.post("/sales", async (req, res, next) => {
         const isPromotion = parseBooleanValue(getValue(row, ["promotion", "promo"])) || Number(discount || 0) > 0;
         const isHoliday = parseBooleanValue(getValue(row, ["holiday"]));
         const isStockout = parseBooleanValue(getValue(row, ["stockoutFlag", "stockout"])) || inventory === 0;
+        if (Number.isFinite(cost)) costRowsDetected += 1;
+        if (Number.isFinite(cost) && price < cost) belowCostRowsDetected += 1;
+        if (isStockout) stockoutRowsDetected += 1;
         const product = await resolveApiProduct({ sku, externalProductId, productName, category, price, cost, inventory });
         const identity = sku || externalProductId || productName || category || product.sku;
         const rowFingerprint = buildFingerprint({ source, identity, date, price, quantity, segment: segment.key });
@@ -239,11 +247,22 @@ ingestRouter.post("/sales", async (req, res, next) => {
 
     if (uniqueRecords.length) {
       await SalesData.insertMany(uniqueRecords, { ordered: false });
+      await setLatestImportBatchActive(importBatch._id);
     }
 
     if (rowIssues.length) {
       await ImportRowIssue.insertMany(rowIssues.slice(0, 250), { ordered: false });
     }
+
+    const dataFitnessScore = uniqueRecords.length
+      ? Math.max(0, Math.min(100, Math.round(
+        60 +
+        (costRowsDetected ? 15 : -20) -
+        (belowCostRowsDetected ? 10 : 0) -
+        (stockoutRowsDetected > rows.length * 0.25 ? 15 : 0)
+      )))
+      : 0;
+    const dataFitnessLabel = dataFitnessScore >= 75 ? "Model usable" : dataFitnessScore >= 50 ? "Model risky" : "Recommendation blocked";
 
     await ImportBatch.findByIdAndUpdate(importBatch._id, {
       status: uniqueRecords.length ? (errors.length ? "completed_with_errors" : "completed") : "failed",
@@ -258,6 +277,19 @@ ingestRouter.post("/sales", async (req, res, next) => {
       productSummary: {
         productsDetected: productsDetected.size
       },
+      dataFitnessScore,
+      dataFitnessLabel,
+      costQualitySummary: {
+        label: costRowsDetected ? (belowCostRowsDetected ? "inconsistent" : "real") : "missing",
+        costRows: costRowsDetected,
+        coveragePercent: rows.length ? Number(((costRowsDetected / rows.length) * 100).toFixed(1)) : 0,
+        belowCostRows: belowCostRowsDetected
+      },
+      datasetWarnings: [
+        ...(!costRowsDetected ? ["No cost values were imported. Profit recommendations will be blocked unless trusted product cost exists."] : []),
+        ...(belowCostRowsDetected ? [`${belowCostRowsDetected} rows had price below cost.`] : []),
+        ...(stockoutRowsDetected ? [`${stockoutRowsDetected} stockout rows detected.`] : [])
+      ],
       completedAt: new Date()
     });
 
@@ -270,6 +302,8 @@ ingestRouter.post("/sales", async (req, res, next) => {
         importedRows: uniqueRecords.length,
         skippedRows: errors.length + (records.length - uniqueRecords.length),
         productsDetected: productsDetected.size,
+        dataFitnessScore,
+        dataFitnessLabel,
         errors: errors.slice(0, 10),
         message: "Sales rows ingested through API. CSV upload remains available for manual imports."
       }

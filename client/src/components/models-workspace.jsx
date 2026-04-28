@@ -47,7 +47,9 @@ import {
 import {
   HorizontalBars,
   MiniRevenueTrend,
+  SectionHeader,
   SummaryCard,
+  TrustStrip,
   WarningPanel
 } from "./common";
 
@@ -72,16 +74,17 @@ export function PricingInsightsPanel({
   const limitedExamples = readiness?.limitedExamples || [];
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white p-4">
-      <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3 text-slate-700">
-          <TrendingUp size={20} />
-          <h2 className="text-base font-semibold">Customer Price Response</h2>
-        </div>
-        <button className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700" onClick={refreshReadiness} type="button">
-          Refresh readiness
-        </button>
-      </div>
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+      <SectionHeader
+        icon={TrendingUp}
+        title="Customer Price Response"
+        description="Fit a pricing insight only when sales history has enough repeated rows and changing prices."
+        action={(
+          <button className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700" onClick={refreshReadiness} type="button">
+            Refresh readiness
+          </button>
+        )}
+      />
 
       <section className="mt-4 shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-3">
         <div className="grid gap-3 sm:grid-cols-3">
@@ -143,6 +146,19 @@ export function PricingInsightsPanel({
       )}
 
       {latestModel && (
+        <div className="mt-4 shrink-0">
+          <TrustStrip
+            items={[
+              { label: "Trust decision", value: latestModel.dataFitnessLabel || latestModel.resultMode || "Not scored" },
+              { label: "Data fitness", value: `${latestModel.dataFitnessScore ?? 0}/100` },
+              { label: "Cost quality", value: latestModel.costQuality?.label || "Unknown" },
+              { label: "Backtest", value: latestModel.modelErrorSummary?.available ? `${Number(latestModel.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}% worst error` : "Not enough history" }
+            ]}
+          />
+        </div>
+      )}
+
+      {latestModel && (
         <div className="mt-4 grid shrink-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {latestModel.resultMode && latestModel.resultMode !== "Price Response Model" && (
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -200,6 +216,11 @@ export function PricingInsightsPanel({
             <p className="text-xs uppercase text-slate-500">Readiness gate</p>
             <p className="mt-1 text-lg font-semibold">{latestModel.readinessLevel || "Simple model ready"}</p>
           </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs uppercase text-slate-500">Data fitness</p>
+            <p className="mt-1 text-lg font-semibold">{latestModel.dataFitnessLabel || "Recommendation blocked"}</p>
+            <p className="mt-1 text-xs text-slate-500">{latestModel.dataFitnessScore ?? 0}/100</p>
+          </div>
             </>
           )}
         </div>
@@ -214,6 +235,11 @@ export function PricingInsightsPanel({
           {latestModel.reliabilityReasons?.length > 0 && (
             <div className="mt-3 grid gap-1 text-sm text-slate-600">
               {latestModel.reliabilityReasons.map((reason) => <p key={reason}>{reason}</p>)}
+            </div>
+          )}
+          {(latestModel.blockedReasons?.length > 0 || latestModel.dataFitnessWarnings?.length > 0) && (
+            <div className="mt-3 grid gap-1 text-sm text-amber-800">
+              {[...(latestModel.blockedReasons || []), ...(latestModel.dataFitnessWarnings || [])].slice(0, 5).map((reason) => <p key={reason}>{reason}</p>)}
             </div>
           )}
         </div>
@@ -242,22 +268,32 @@ export function PricingInsightsPanel({
           {latestModel.featuresUsed?.length > 0 && (
             <p className="mt-3 text-sm text-slate-600">Features used: {latestModel.featuresUsed.join(", ")}</p>
           )}
-          {latestModel.accuracyMetrics?.available ? (
+          {(latestModel.backtestMetrics || latestModel.accuracyMetrics)?.available ? (
             <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="text-sm font-semibold text-slate-900">Accuracy check on held-out sales</p>
               <div className="mt-2 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
-                <p>Train rows: {latestModel.accuracyMetrics.trainRows}</p>
-                <p>Test rows: {latestModel.accuracyMetrics.testRows}</p>
-                <p>Model tested: {latestModel.accuracyMetrics.trainedModelType}</p>
-                <p>Demand error: {Number(latestModel.accuracyMetrics.demandMAPE || 0).toFixed(1)}%</p>
-                <p>Revenue error: {Number(latestModel.accuracyMetrics.revenueMAPE || 0).toFixed(1)}%</p>
-                <p>Profit error: {Number(latestModel.accuracyMetrics.profitMAPE || 0).toFixed(1)}%</p>
+                <p>Train rows: {(latestModel.backtestMetrics || latestModel.accuracyMetrics).trainRows}</p>
+                <p>Test rows: {(latestModel.backtestMetrics || latestModel.accuracyMetrics).testRows}</p>
+                <p>Model tested: {(latestModel.backtestMetrics || latestModel.accuracyMetrics).trainedModelType}</p>
+                <p>Demand error: {Number((latestModel.backtestMetrics || latestModel.accuracyMetrics).demandMAPE || 0).toFixed(1)}%</p>
+                <p>Revenue error: {Number((latestModel.backtestMetrics || latestModel.accuracyMetrics).revenueMAPE || 0).toFixed(1)}%</p>
+                <p>Profit error: {Number((latestModel.backtestMetrics || latestModel.accuracyMetrics).profitMAPE || 0).toFixed(1)}%</p>
               </div>
             </div>
           ) : (
             <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-              Accuracy check unavailable: {latestModel.accuracyMetrics?.reason || "not enough held-out demand points yet."}
+              Accuracy check unavailable: {(latestModel.backtestMetrics || latestModel.accuracyMetrics)?.reason || "not enough held-out demand points yet."}
             </p>
+          )}
+          {latestModel.predictionIntervals?.demand && (
+            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <p className="text-sm font-semibold text-slate-900">Prediction range at average price</p>
+              <div className="mt-2 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
+                <p>Demand: {latestModel.predictionIntervals.demand.low} to {latestModel.predictionIntervals.demand.high} units</p>
+                <p>Revenue: {formatCurrency(latestModel.predictionIntervals.revenue.low, "USD")} to {formatCurrency(latestModel.predictionIntervals.revenue.high, "USD")}</p>
+                <p>Profit: {formatCurrency(latestModel.predictionIntervals.profit.low, "USD")} to {formatCurrency(latestModel.predictionIntervals.profit.high, "USD")}</p>
+              </div>
+            </div>
           )}
           {latestModel.mlReadiness && (
             <div className={`mt-3 rounded-md border p-3 text-sm ${latestModel.mlReadiness.ready ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
@@ -364,7 +400,7 @@ export function SeasonalityPanel({ seasonality, state, message, refreshSeasonali
   const weekendSplit = seasonality?.weekendSplit || [];
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white p-4">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <CalendarDays size={20} />

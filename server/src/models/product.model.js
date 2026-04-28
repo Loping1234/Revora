@@ -51,6 +51,13 @@ const productSchema = new mongoose.Schema(
       type: [String],
       default: []
     },
+    costQuality: {
+      type: String,
+      enum: ["real", "estimated", "missing", "inconsistent"],
+      required: true,
+      default: "real",
+      index: true
+    },
     matchConfidence: {
       type: Number,
       default: 1,

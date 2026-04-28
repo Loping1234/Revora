@@ -38,6 +38,10 @@ const workspaceSettingsSchema = new mongoose.Schema(
       required: true,
       trim: true,
       default: "Pricing Recommendation Report"
+    },
+    activeImportBatchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ImportBatch"
     }
   },
   { timestamps: true }

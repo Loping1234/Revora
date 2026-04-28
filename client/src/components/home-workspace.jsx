@@ -130,7 +130,8 @@ export function HomeOverview({
   ];
 
   return (
-    <div className="grid gap-4">
+    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+      <div className="grid gap-4">
       <section className="shrink-0 rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -351,5 +352,6 @@ export function HomeOverview({
         )}
       </div>}
     </div>
+    </section>
   );
 }
