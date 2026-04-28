@@ -60,7 +60,7 @@ export function SalesDataPanel({ handleUpload, handleDownloadPanelReport, select
   const datasetWarnings = uploadSummary?.datasetWarnings || [];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex items-center gap-3 text-slate-700">
         <Upload size={20} />
         <h2 className="text-base font-semibold">Import Sales History</h2>
@@ -279,7 +279,7 @@ export function DataQualityPanel({ dataQuality, state, message, refreshDataQuali
   const activeImportBatchId = dataQuality?.activeImportBatchId ? String(dataQuality.activeImportBatchId) : "";
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <Gauge size={20} />
@@ -333,7 +333,7 @@ export function DataQualityPanel({ dataQuality, state, message, refreshDataQuali
         </div>
       </section>
 
-      <div className="mt-4 grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-2">
+      <div className="mt-4 grid min-h-0 gap-4 xl:grid-cols-2">
         <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
           <h3 className="text-sm font-semibold text-slate-900">Readiness split</h3>
           <div className="mt-4">
@@ -402,7 +402,7 @@ export function ProductMatchingPanel({ duplicatesData, duplicatesState, duplicat
   const duplicates = duplicatesData?.duplicates || [];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <GitBranch size={20} />

@@ -74,7 +74,7 @@ export function PricingInsightsPanel({
   const limitedExamples = readiness?.limitedExamples || [];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <SectionHeader
         icon={TrendingUp}
         title="Customer Price Response"
@@ -337,7 +337,7 @@ export function PricingInsightsPanel({
         <section className="rounded-md border border-slate-200 bg-white p-4">
           <h3 className="text-sm font-semibold text-slate-900">Combinations that can create insights</h3>
           <p className="mt-1 text-xs text-slate-500">These product/customer groups have at least 3 sales rows.</p>
-          <div className="mt-3 grid gap-2">
+          <div className="mt-3 grid max-h-[520px] gap-2 overflow-auto pr-1">
             {readyItems.map((item) => (
               <button
                 key={`${item.productId}-${item.segment}`}
@@ -359,7 +359,7 @@ export function PricingInsightsPanel({
         <section className="rounded-md border border-slate-200 bg-white p-4">
           <h3 className="text-sm font-semibold text-slate-900">Why some insights fail</h3>
           <p className="mt-1 text-xs text-slate-500">These examples have only 1-2 rows, so the model correctly refuses to fit.</p>
-          <div className="mt-3 grid gap-2">
+          <div className="mt-3 grid max-h-[520px] gap-2 overflow-auto pr-1">
             {limitedExamples.map((item) => (
               <p key={`${item.productId}-${item.segment}`} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 <span className="font-medium">{item.name}</span> - {item.segmentLabel} has {item.records} row{item.records === 1 ? "" : "s"}
@@ -400,7 +400,7 @@ export function SeasonalityPanel({ seasonality, state, message, refreshSeasonali
   const weekendSplit = seasonality?.weekendSplit || [];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <CalendarDays size={20} />

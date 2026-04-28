@@ -1,4 +1,4 @@
-export { Sidebar, WorkspaceTabs, PlaceholderPanel, LoginScreen } from "./layout";
+export { Sidebar, WorkspaceTabs, PlaceholderPanel, LoginScreen, AppShell } from "./layout";
 export { HomeOverview } from "./home-workspace";
 export { SalesDataPanel, DataQualityPanel, ProductMatchingPanel } from "./data-workspace";
 export { ProductsTable, ProductIntelligencePanel, CustomerSegmentsPanel, CompetitorMarketPanel, ProductRelationshipsPanel } from "./products-workspace";

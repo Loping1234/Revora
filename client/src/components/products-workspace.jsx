@@ -135,7 +135,7 @@ export function ProductsTable({ products, productError, currency }) {
   }
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-base font-semibold">Product Portfolio</h2>
@@ -266,7 +266,7 @@ export function ProductIntelligencePanel({ productIntelligence, state, message, 
   const bestToAnalyze = productIntelligence?.bestToAnalyze || [];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <Boxes size={20} />
@@ -344,7 +344,7 @@ export function ProductIntelligencePanel({ productIntelligence, state, message, 
 
 export function CustomerSegmentsPanel({ segments, state, message, refreshCustomerSegments, currency }) {
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <Users size={20} />
@@ -408,7 +408,7 @@ export function CompetitorMarketPanel({ market, state, message, refreshCompetito
   const products = market?.products || [];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <BadgeDollarSign size={20} />
@@ -470,7 +470,7 @@ export function ProductRelationshipsPanel({ relationships, state, message, refre
   const rows = relationships?.relationships || [];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <GitBranch size={20} />

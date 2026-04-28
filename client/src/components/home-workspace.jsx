@@ -130,7 +130,7 @@ export function HomeOverview({
   ];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="grid gap-4">
       <section className="shrink-0 rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -169,7 +169,7 @@ export function HomeOverview({
       </section>
 
       {isEmpty && (
-        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
           <section className="rounded-lg border border-dashed border-slate-300 bg-white p-4">
             <h3 className="text-lg font-semibold text-slate-950">Upload sales data to unlock revenue insights.</h3>
             <p className="mt-2 max-w-3xl text-sm text-slate-500">
@@ -224,9 +224,9 @@ export function HomeOverview({
         </div>
       </div>}
 
-      {!isEmpty && <div className="min-h-0 flex-1 overflow-hidden">
+      {!isEmpty && <div className="min-h-0">
         {activeHomeTab === "overview" && (
-          <div className="grid h-full min-h-0 gap-4 xl:grid-rows-[auto_minmax(0,1fr)]">
+          <div className="grid min-h-0 gap-4">
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <SummaryCard icon={TrendingUp} label="Total Revenue" value={formatCurrency(metrics.totalRevenue, currency)} note="From imported sales" />
               <SummaryCard icon={Target} label="Total Profit" value={formatCurrency(metrics.totalProfit, currency)} note="After product costs" />
@@ -295,7 +295,7 @@ export function HomeOverview({
         )}
 
         {activeHomeTab === "breakdown" && (
-          <div className="grid h-full min-h-0 gap-4 xl:grid-cols-2">
+          <div className="grid min-h-0 gap-4 xl:grid-cols-2">
             <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
               <h3 className="text-base font-semibold">Customer Groups</h3>
               <p className="mt-1 text-sm text-slate-500">Revenue contribution by customer type.</p>
@@ -315,7 +315,7 @@ export function HomeOverview({
         )}
 
         {activeHomeTab === "recent" && (
-          <section className="h-full min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+          <section className="min-h-0 rounded-lg border border-slate-200 bg-white p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="text-base font-semibold">Recent Recommendations</h3>

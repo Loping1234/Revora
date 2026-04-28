@@ -47,6 +47,8 @@ import {
 import {
   HorizontalBars,
   MiniRevenueTrend,
+  FormRow,
+  SectionHeader,
   SummaryCard,
   WarningPanel
 } from "./common";
@@ -63,11 +65,12 @@ export function ReportsExportPanel({ recommendations, exportState, exportMessage
   ];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center gap-3 text-slate-700">
-        <FileDown size={20} />
-        <h2 className="text-base font-semibold">Download Reports</h2>
-      </div>
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <SectionHeader
+        icon={FileDown}
+        title="Download Reports"
+        description="Export polished workbooks for each major workspace and a complete examiner report."
+      />
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
@@ -115,21 +118,21 @@ export function ReportsExportPanel({ recommendations, exportState, exportMessage
 
 export function SettingsPanel({ settingsForm, setSettingsForm, settingsState, settingsMessage, handleSaveSettings, resetState, resetMessage, handleResetData }) {
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center gap-3 text-slate-700">
-        <Settings size={20} />
-        <h2 className="text-base font-semibold">Workspace Settings</h2>
-      </div>
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <SectionHeader
+        icon={Settings}
+        title="Workspace Settings"
+        description="Control workspace branding, reporting defaults, appearance, and demo security settings."
+      />
 
       <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={handleSaveSettings}>
-        <label className="grid gap-2 text-sm font-medium text-slate-700">
-          Company name
+        <FormRow label="Company name">
           <input
             className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-700"
             onChange={(event) => setSettingsForm((current) => ({ ...current, companyName: event.target.value }))}
             value={settingsForm.companyName}
           />
-        </label>
+        </FormRow>
 
         <label className="grid gap-2 text-sm font-medium text-slate-700">
           Currency

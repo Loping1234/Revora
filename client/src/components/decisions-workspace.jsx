@@ -47,7 +47,9 @@ import {
 import {
   HorizontalBars,
   MiniRevenueTrend,
+  SectionHeader,
   SummaryCard,
+  TrustStrip,
   WarningPanel
 } from "./common";
 
@@ -69,11 +71,12 @@ export function PriceSimulatorPanel({
   handleSimulatePrice
 }) {
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
-      <div className="shrink-0 flex items-center gap-3 text-slate-700">
-        <Calculator size={20} />
-        <h2 className="text-base font-semibold">Test a Price</h2>
-      </div>
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <SectionHeader
+        icon={Calculator}
+        title="Test a Price"
+        description="Estimate demand, revenue, and profit for one chosen price using the current pricing model."
+      />
 
       <form className="mt-4 shrink-0 grid gap-3 xl:grid-cols-[minmax(0,1fr)_170px_160px_180px_auto]" onSubmit={handleSimulatePrice}>
         <select
@@ -138,6 +141,14 @@ export function PriceSimulatorPanel({
 
       {simulationResult && (
         <div className="mt-4 grid gap-3 pr-1">
+          <TrustStrip
+            items={[
+              { label: "Decision", value: simulationResult.decisionLabel || "Use with caution" },
+              { label: "Model reliability", value: simulationResult.resultReliability?.label || "Weak" },
+              { label: "Data fitness", value: simulationResult.dataFitnessLabel || "Not scored" },
+              { label: "Backtest", value: simulationResult.modelErrorSummary?.available ? `${Number(simulationResult.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}% worst error` : "Not enough history" }
+            ]}
+          />
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs uppercase text-slate-500">Expected demand</p>
@@ -252,12 +263,12 @@ export function ScenarioPlannerPanel({
   }
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
-      <div className="shrink-0 flex items-center gap-3 text-slate-700">
-        <PieChart size={20} />
-        <h2 className="text-base font-semibold">Scenario Planner</h2>
-      </div>
-      <p className="mt-1 shrink-0 text-sm text-slate-500">Compare up to three prices side by side before creating a formal recommendation.</p>
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <SectionHeader
+        icon={PieChart}
+        title="Scenario Planner"
+        description="Compare up to three prices side by side before creating a formal recommendation."
+      />
 
       <form className="mt-4 shrink-0 grid gap-3 xl:grid-cols-[minmax(0,1fr)_170px_repeat(3,130px)_160px_auto]" onSubmit={handlePlanScenarios}>
         <select className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-700" onChange={(event) => setScenarioProductId(event.target.value)} value={scenarioProductId}>
@@ -372,11 +383,12 @@ export function RecommendationPanel({
     : [];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
-      <div className="shrink-0 flex items-center gap-3 text-slate-700">
-        <Target size={20} />
-        <h2 className="text-base font-semibold">Find the Best Price</h2>
-      </div>
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <SectionHeader
+        icon={Target}
+        title="Find the Best Price"
+        description="Compare candidate prices and return a guarded recommendation only when the model can defend it."
+      />
 
       <form className="mt-4 shrink-0 grid gap-3 xl:grid-cols-[minmax(0,1fr)_150px_140px_130px_130px_110px_150px_auto]" onSubmit={handleCreateRecommendation}>
         <select
@@ -473,6 +485,14 @@ export function RecommendationPanel({
 
       {recommendationResult && (
         <div className="mt-4 grid gap-3 pr-1">
+          <TrustStrip
+            items={[
+              { label: "Decision", value: recommendationResult.recommendationStatus || recommendationResult.decisionLabel || "Use with caution" },
+              { label: "Model reliability", value: recommendationResult.resultReliability?.label || "Weak" },
+              { label: "Data fitness", value: recommendationResult.dataFitnessLabel || "Not scored" },
+              { label: "Backtest", value: recommendationResult.modelErrorSummary?.available ? `${Number(recommendationResult.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}% worst error` : "Not enough history" }
+            ]}
+          />
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs uppercase text-slate-500">Recommended price</p>

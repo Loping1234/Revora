@@ -24,6 +24,7 @@ button {
 .theme-dark {
   color: #e5e7eb;
   background: #000000;
+  color-scheme: dark;
 }
 
 .theme-dark aside,
@@ -39,7 +40,12 @@ button {
 
 .theme-dark .bg-slate-50,
 .theme-dark .bg-slate-100 {
-  background-color: #111111;
+  background-color: #121212;
+}
+
+.theme-dark .bg-slate-200,
+.theme-dark .bg-slate-300 {
+  background-color: #1f1f1f;
 }
 
 .theme-dark .bg-slate-900,
@@ -49,7 +55,8 @@ button {
 
 .theme-dark .border-slate-100,
 .theme-dark .border-slate-200,
-.theme-dark .border-slate-300 {
+.theme-dark .border-slate-300,
+.theme-dark .border-dashed {
   border-color: #262626;
 }
 
@@ -73,6 +80,11 @@ button {
   color: #e5e7eb;
 }
 
+.theme-dark input[type="file"]::file-selector-button {
+  background-color: #111111;
+  color: #e5e7eb;
+}
+
 .theme-dark input::placeholder,
 .theme-dark textarea::placeholder {
   color: #64748b;
@@ -84,6 +96,17 @@ button {
 .theme-dark .hover\:bg-slate-100:hover,
 .theme-dark .hover\:bg-white:hover {
   background-color: #151515;
+}
+
+.theme-dark button:disabled,
+.theme-dark .disabled\:bg-slate-400:disabled,
+.theme-dark .disabled\:bg-slate-100:disabled {
+  background-color: #1f1f1f;
+  color: #64748b;
+}
+
+.theme-dark summary {
+  color: #cbd5e1;
 }
 
 .theme-dark tr.border-slate-100,
@@ -152,4 +175,22 @@ button {
 
 .theme-dark .text-blue-700 {
   color: #7dd3fc;
+}
+
+.theme-dark ::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+.theme-dark ::-webkit-scrollbar-track {
+  background: #050505;
+}
+
+.theme-dark ::-webkit-scrollbar-thumb {
+  background: #262626;
+  border-radius: 999px;
+}
+
+.theme-dark ::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
 }

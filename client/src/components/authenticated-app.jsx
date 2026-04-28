@@ -39,6 +39,7 @@ import {
   DataQualityPanel,
   HistoryPanel,
   HomeOverview,
+  AppShell,
   PlaceholderPanel,
   PriceSimulatorPanel,
   PricingInsightsPanel,
@@ -1390,60 +1391,21 @@ export function AuthenticatedApp({ session, onLogout }) {
   ]);
 
   return (
-    <main className={`h-screen overflow-hidden bg-slate-50 text-slate-950 ${settings.appearanceMode === "dark" ? "theme-dark" : ""}`}>
-      {isSidebarOpen && <div className="fixed inset-0 z-20 bg-slate-950/30 lg:hidden" onClick={() => setIsSidebarOpen(false)} />}
-
-      <div className="grid h-screen min-h-0 lg:grid-cols-[288px_1fr]">
-        <Sidebar activePanel={activePanel} isOpen={isSidebarOpen} setActivePanel={setActivePanel} setIsOpen={setIsSidebarOpen} settings={settings} />
-
-        <section className="flex h-screen min-w-0 flex-col overflow-hidden px-5 py-4 sm:px-8 lg:px-8">
-          <header className="shrink-0 flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-start gap-3">
-              <button
-                aria-label="Open sidebar"
-                className="mt-1 rounded-md border border-slate-200 bg-white p-2 text-slate-600 lg:hidden"
-                onClick={() => setIsSidebarOpen(true)}
-                type="button"
-              >
-                <Menu size={18} />
-              </button>
-              <div>
-                <p className="text-xs font-medium uppercase text-slate-500">Pricing Management</p>
-                <h1 className="mt-1 text-2xl font-semibold tracking-normal">{activeItem.label}</h1>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="hidden items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 sm:flex">
-                <UserRound size={14} />
-                <span>{session.user.name}</span>
-                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium capitalize">{session.user.role}</span>
-              </div>
-              <StatusPill state={status} />
-              <details className="relative">
-                <summary className="list-none rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
-                  Details
-                </summary>
-                <div className="absolute right-0 z-20 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-lg">
-                  <p className="truncate">Service: {API_BASE_URL}</p>
-                  <p className="mt-2">Data connection: {databaseStatus}</p>
-                  <p className="mt-2">Last checked: {health?.timestamp ? new Date(health.timestamp).toLocaleTimeString() : "Pending"}</p>
-                  <p className="mt-2">{error || "No system errors reported"}</p>
-                </div>
-              </details>
-              <button
-                aria-label="Logout"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                onClick={onLogout}
-                type="button"
-              >
-                <LogOut size={15} />
-              </button>
-            </div>
-          </header>
-
-          <div className="mt-4 min-h-0 flex-1 overflow-hidden pr-1">{panelContent}</div>
-        </section>
-      </div>
-    </main>
+    <AppShell
+      activeItem={{ ...activeItem, id: activePanel }}
+      apiBaseUrl={API_BASE_URL}
+      databaseStatus={databaseStatus}
+      error={error}
+      health={health}
+      isSidebarOpen={isSidebarOpen}
+      onLogout={onLogout}
+      session={session}
+      setActivePanel={setActivePanel}
+      setIsSidebarOpen={setIsSidebarOpen}
+      settings={settings}
+      status={status}
+    >
+      {panelContent}
+    </AppShell>
   );
 }

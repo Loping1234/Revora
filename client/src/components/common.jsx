@@ -37,6 +37,23 @@ export function WorkspacePanel({ children, className = "" }) {
   );
 }
 
+export function ScrollablePanel({ children, className = "" }) {
+  return (
+    <section className={`min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4 ${className}`}>
+      {children}
+    </section>
+  );
+}
+
+export function FormRow({ label, children, className = "" }) {
+  return (
+    <label className={`grid gap-2 text-sm font-medium text-slate-700 ${className}`}>
+      {label}
+      {children}
+    </label>
+  );
+}
+
 export function SectionHeader({ icon: Icon, title, description, action }) {
   return (
     <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

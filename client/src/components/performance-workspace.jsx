@@ -62,7 +62,7 @@ export function DashboardPanel({ dashboardData, dashboardState, dashboardMessage
   const trend = dashboardData?.trend || [];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <section className="shrink-0 rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3 text-slate-700">
@@ -83,29 +83,29 @@ export function DashboardPanel({ dashboardData, dashboardState, dashboardMessage
         <SummaryCard icon={CheckCircle2} label="Recommendations" value={formatNumber(metrics.recommendationCount)} note={`${formatNumber(metrics.modelCount)} pricing insights ready`} />
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-2">
-        <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+      <div className="grid min-h-0 gap-4 xl:grid-cols-2">
+        <section className="max-h-[360px] min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
           <h3 className="text-base font-semibold">Top Products by Revenue</h3>
           <div className="mt-4">
             <HorizontalBars items={topProducts} labelKey="name" valueKey="revenue" valueFormatter={(value) => formatCurrency(value, currency)} emptyText="No sales data available yet." />
           </div>
         </section>
 
-        <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+        <section className="max-h-[360px] min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
           <h3 className="text-base font-semibold">Customer Groups</h3>
           <div className="mt-4">
             <HorizontalBars items={segments} labelKey="label" valueKey="revenue" valueFormatter={(value) => formatCurrency(value, currency)} emptyText="No customer group data available yet." />
           </div>
         </section>
 
-        <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+        <section className="max-h-[460px] min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
           <h3 className="text-base font-semibold">Categories</h3>
           <div className="mt-4">
             <HorizontalBars items={categories} labelKey="category" valueKey="revenue" valueFormatter={(value) => formatCurrency(value, currency)} emptyText="No category data available yet." />
           </div>
         </section>
 
-        <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+        <section className="max-h-[460px] min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
           <h3 className="text-base font-semibold">Revenue by Month</h3>
           <div className="mt-4">
             <HorizontalBars items={trend} labelKey="month" valueKey="revenue" valueFormatter={(value) => formatCurrency(value, currency)} emptyText="No monthly trend available yet." />
@@ -118,7 +118,7 @@ export function DashboardPanel({ dashboardData, dashboardState, dashboardMessage
 
 export function HistoryPanel({ recommendations, historyState, historyMessage, currency, refreshHistory, handleApplyRecommendation }) {
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <History size={20} />
@@ -207,7 +207,7 @@ export function RecommendationPerformancePanel({ performance, state, message, cu
   const outcomes = performance?.outcomes || [];
 
   return (
-    <section className="h-full overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-slate-700">
           <Gauge size={20} />
