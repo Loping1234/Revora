@@ -166,6 +166,70 @@ export function SummaryCard({ icon: Icon, label, value, note }) {
   );
 }
 
+export function ExplainableNumber({ children, title = "How this was calculated", lines = [], className = "" }) {
+  const visibleLines = lines.filter(Boolean);
+
+  if (!visibleLines.length) {
+    return <span className={className}>{children}</span>;
+  }
+
+  return (
+    <span className={`group relative inline-flex w-fit max-w-full cursor-help items-center border-b border-dotted border-slate-400 focus-within:outline-none ${className}`} tabIndex={0}>
+      {children}
+      <span className="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden w-80 max-w-[min(80vw,20rem)] rounded-md border border-slate-200 bg-white p-3 text-left text-xs font-normal leading-5 text-slate-600 shadow-xl group-hover:block group-focus:block group-focus-within:block">
+        <span className="block font-semibold text-slate-900">{title}</span>
+        <span className="mt-2 grid gap-1">
+          {visibleLines.map((line) => (
+            <span key={line} className="block">{line}</span>
+          ))}
+        </span>
+      </span>
+    </span>
+  );
+}
+
+export function CalculationWorkingPanel({ title = "Show working", summary, items = [], formulas = [], evidence = [], defaultOpen = false }) {
+  const visibleItems = items.filter((item) => item?.label || item?.value);
+  const visibleFormulas = formulas.filter(Boolean);
+  const visibleEvidence = evidence.filter(Boolean);
+
+  if (!summary && !visibleItems.length && !visibleFormulas.length && !visibleEvidence.length) return null;
+
+  return (
+    <details className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600" open={defaultOpen}>
+      <summary className="cursor-pointer text-sm font-semibold text-slate-900">{title}</summary>
+      <div className="mt-3 grid gap-4">
+        {summary && <p className="leading-6">{summary}</p>}
+        {visibleItems.length > 0 && (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {visibleItems.map((item) => (
+              <div key={`${item.label}-${item.value}`} className="rounded-md bg-slate-50 p-3">
+                <p className="text-xs uppercase text-slate-500">{item.label}</p>
+                <p className="mt-1 font-semibold text-slate-900">{item.value}</p>
+                {item.note && <p className="mt-1 text-xs text-slate-500">{item.note}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+        {visibleFormulas.length > 0 && (
+          <div className="grid gap-2 rounded-md bg-slate-50 p-3">
+            {visibleFormulas.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </div>
+        )}
+        {visibleEvidence.length > 0 && (
+          <div className="grid gap-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
+            {visibleEvidence.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 export function WarningPanel({ warnings, title = "Use with care" }) {
   if (!warnings?.length) return null;
 

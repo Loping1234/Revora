@@ -46,6 +46,8 @@ import {
 } from "../utils/statusStyles";
 import {
   HorizontalBars,
+  CalculationWorkingPanel,
+  ExplainableNumber,
   MiniRevenueTrend,
   SectionHeader,
   SummaryCard,
@@ -67,7 +69,8 @@ export function PricingInsightsPanel({
   handleFitModel,
   modelState,
   modelMessage,
-  latestModel
+  latestModel,
+  currency = "USD"
 }) {
   const modelWarnings = latestModel?.warnings || [];
   const readyItems = readiness?.ready || [];
@@ -150,6 +153,7 @@ export function PricingInsightsPanel({
           <TrustStrip
             items={[
               { label: "Trust decision", value: latestModel.dataFitnessLabel || latestModel.resultMode || "Not scored" },
+              { label: "Model reliability", value: latestModel.modelReliabilityLabel || latestModel.reliabilityLabel || "Weak" },
               { label: "Data fitness", value: `${latestModel.dataFitnessScore ?? 0}/100` },
               { label: "Cost quality", value: latestModel.costQuality?.label || "Unknown" },
               { label: "Backtest", value: latestModel.modelErrorSummary?.available ? `${Number(latestModel.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}% worst error` : "Not enough history" }
@@ -176,7 +180,7 @@ export function PricingInsightsPanel({
               </div>
               <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <p className="text-xs uppercase text-slate-500">Revenue</p>
-                <p className="mt-1 text-xl font-semibold">{formatCurrency(latestModel.summaryMetrics.revenue, "USD")}</p>
+                <p className="mt-1 text-xl font-semibold">{formatCurrency(latestModel.summaryMetrics.revenue, currency)}</p>
               </div>
               <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <p className="text-xs uppercase text-slate-500">Price levels</p>
@@ -195,22 +199,50 @@ export function PricingInsightsPanel({
             <p className="mt-1 text-lg font-semibold">{latestModel.modelType === "context-adjusted" ? "Context-Adjusted" : latestModel.modelType === "log-log" ? "Log-Log Elasticity" : "Simple Price Response"}</p>
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs uppercase text-slate-500">Reliability</p>
-            <p className={`mt-1 inline-flex rounded-md px-2 py-1 text-lg font-semibold ${getReliabilityStyles(latestModel.reliabilityLabel)}`}>
-              {latestModel.reliabilityLabel || "Weak"}
+            <p className="text-xs uppercase text-slate-500">Model reliability</p>
+            <p className={`mt-1 inline-flex rounded-md px-2 py-1 text-lg font-semibold ${getReliabilityStyles(latestModel.modelReliabilityLabel || latestModel.reliabilityLabel)}`}>
+              <ExplainableNumber lines={[
+                `${latestModel.groupedDemandPoints || latestModel.recordsUsed || 0} grouped demand points.`,
+                `${latestModel.distinctPriceCount || 0} different price levels.`,
+                latestModel.modelErrorSummary?.available ? `Backtest worst error: ${Number(latestModel.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}%.` : "Backtest unavailable.",
+                ...(latestModel.modelReliabilityReasons || latestModel.reliabilityReasons || []).slice(0, 2)
+              ]}>
+                {latestModel.modelReliabilityLabel || latestModel.reliabilityLabel || "Weak"}
+              </ExplainableNumber>
             </p>
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs uppercase text-slate-500">Price sensitivity</p>
-            <p className="mt-1 text-xl font-semibold">{getPriceSensitivityLabel(latestModel)}</p>
+            <p className="mt-1 text-xl font-semibold">
+              <ExplainableNumber lines={[
+                `Price response strength: ${Number(latestModel.b || 0).toFixed(4)}.`,
+                "This indicates how strongly quantity changes when price changes."
+              ]}>
+                {getPriceSensitivityLabel(latestModel)}
+              </ExplainableNumber>
+            </p>
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs uppercase text-slate-500">Confidence</p>
-            <p className="mt-1 text-xl font-semibold">{getConfidenceLabel(latestModel)}</p>
+            <p className="text-xs uppercase text-slate-500">Model evidence</p>
+            <p className="mt-1 text-xl font-semibold">
+              <ExplainableNumber lines={[
+                `Historical fit score: ${Number(latestModel.rSquared || 0).toFixed(3)}.`,
+                "This is evidence from past data, not a guarantee of future accuracy."
+              ]}>
+                {getConfidenceLabel(latestModel)}
+              </ExplainableNumber>
+            </p>
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs uppercase text-slate-500">Demand points</p>
-            <p className="mt-1 text-xl font-semibold">{latestModel.groupedDemandPoints || latestModel.recordsUsed}</p>
+            <p className="mt-1 text-xl font-semibold">
+              <ExplainableNumber lines={[
+                "Grouped by product + customer group + date + price.",
+                `Raw rows used: ${latestModel.rawRowsUsed || latestModel.recordsUsed || 0}.`
+              ]}>
+                {latestModel.groupedDemandPoints || latestModel.recordsUsed}
+              </ExplainableNumber>
+            </p>
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs uppercase text-slate-500">Readiness gate</p>
@@ -232,9 +264,9 @@ export function PricingInsightsPanel({
           <p className="mt-2 text-sm leading-6 text-slate-600">
             This tells whether customers reduce buying when price increases. The model uses grouped demand points, not raw transaction rows, so repeated sales at the same product, date, customer group, and price are treated as one demand signal.
           </p>
-          {latestModel.reliabilityReasons?.length > 0 && (
+          {(latestModel.modelReliabilityReasons || latestModel.reliabilityReasons)?.length > 0 && (
             <div className="mt-3 grid gap-1 text-sm text-slate-600">
-              {latestModel.reliabilityReasons.map((reason) => <p key={reason}>{reason}</p>)}
+              {(latestModel.modelReliabilityReasons || latestModel.reliabilityReasons).map((reason) => <p key={reason}>{reason}</p>)}
             </div>
           )}
           {(latestModel.blockedReasons?.length > 0 || latestModel.dataFitnessWarnings?.length > 0) && (
@@ -260,7 +292,7 @@ export function PricingInsightsPanel({
             {(latestModel.modelComparison.models || []).map((model) => (
               <div key={model.modelType} className={`rounded-md border p-3 ${model.selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
                 <p className="text-sm font-semibold text-slate-900">{model.modelType === "context-adjusted" ? "Context-adjusted" : model.modelType === "log-log" ? "Log-log" : "Linear"}</p>
-                <p className="mt-1 text-xs text-slate-500">Confidence score {Number(model.rSquared || 0).toFixed(3)}</p>
+              <p className="mt-1 text-xs text-slate-500">Historical fit {Number(model.rSquared || 0).toFixed(3)}</p>
                 <p className="mt-1 text-xs text-slate-500">{(model.featuresUsed || []).join(", ")}</p>
               </div>
             ))}
@@ -290,8 +322,8 @@ export function PricingInsightsPanel({
               <p className="text-sm font-semibold text-slate-900">Prediction range at average price</p>
               <div className="mt-2 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
                 <p>Demand: {latestModel.predictionIntervals.demand.low} to {latestModel.predictionIntervals.demand.high} units</p>
-                <p>Revenue: {formatCurrency(latestModel.predictionIntervals.revenue.low, "USD")} to {formatCurrency(latestModel.predictionIntervals.revenue.high, "USD")}</p>
-                <p>Profit: {formatCurrency(latestModel.predictionIntervals.profit.low, "USD")} to {formatCurrency(latestModel.predictionIntervals.profit.high, "USD")}</p>
+                <p>Revenue: {formatCurrency(latestModel.predictionIntervals.revenue.low, currency)} to {formatCurrency(latestModel.predictionIntervals.revenue.high, currency)}</p>
+                <p>Profit: {formatCurrency(latestModel.predictionIntervals.profit.low, currency)} to {formatCurrency(latestModel.predictionIntervals.profit.high, currency)}</p>
               </div>
             </div>
           )}
@@ -371,24 +403,32 @@ export function PricingInsightsPanel({
       </div>
 
       {latestModel?.resultMode === "Price Response Model" && (
-        <details className="mt-4 shrink-0 rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600">
-          <summary className="cursor-pointer font-medium text-slate-800">How this was calculated</summary>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <p>Formula: {latestModel.formulaText || "Expected demand from price response model"}</p>
-            <p>Confidence score: {latestModel.rSquared.toFixed(3)}</p>
-            <p>Reliability score: {latestModel.reliabilityScore || 0}/100</p>
-            <p>Raw rows used: {latestModel.rawRowsUsed || latestModel.recordsUsed}</p>
-            <p>Grouped demand points: {latestModel.groupedDemandPoints || latestModel.recordsUsed}</p>
-            <p>Different prices: {latestModel.distinctPriceCount || 0}</p>
-            <p>Price range used: {formatCurrency(latestModel.priceRangeMin, "USD")} to {formatCurrency(latestModel.priceRangeMax, "USD")}</p>
-            <p>Demand range observed: {Number(latestModel.demandRangeMin || 0).toFixed(2)} to {Number(latestModel.demandRangeMax || 0).toFixed(2)} units</p>
-            <p>Average price: {formatCurrency(latestModel.averagePrice, "USD")}</p>
-            <p>Average demand: {Number(latestModel.averageDemand || 0).toFixed(2)} units</p>
-            <p>Excluded rows: {latestModel.excludedRows || 0}</p>
-            <p>Price response strength: {Number(latestModel.b || 0).toFixed(4)}</p>
-            <p>Standard error: {latestModel.stdErr.toFixed(2)}</p>
-          </div>
-        </details>
+        <div className="mt-4">
+          <CalculationWorkingPanel
+            title="Show working"
+            defaultOpen
+            summary="The model first converts raw sales rows into grouped demand points, then fits a price-response formula only if there is enough price variation."
+            items={[
+              { label: "Formula", value: latestModel.formulaText || "Estimated demand from price response model" },
+              { label: "Raw rows", value: latestModel.rawRowsUsed || latestModel.recordsUsed || 0 },
+              { label: "Grouped points", value: latestModel.groupedDemandPoints || latestModel.recordsUsed || 0 },
+              { label: "Price levels", value: latestModel.distinctPriceCount || 0 },
+              { label: "Price range", value: `${formatCurrency(latestModel.priceRangeMin, currency)} to ${formatCurrency(latestModel.priceRangeMax, currency)}` },
+              { label: "Demand range", value: `${Number(latestModel.demandRangeMin || 0).toFixed(2)} to ${Number(latestModel.demandRangeMax || 0).toFixed(2)} units` },
+              { label: "Average price", value: formatCurrency(latestModel.averagePrice, currency) },
+              { label: "Average demand", value: `${Number(latestModel.averageDemand || 0).toFixed(2)} units` }
+            ]}
+            formulas={[
+              `Historical fit score = ${Number(latestModel.rSquared || 0).toFixed(3)}.`,
+              `Price response strength = ${Number(latestModel.b || 0).toFixed(4)}.`,
+              `Excluded rows = ${latestModel.excludedRows || 0}.`
+            ]}
+            evidence={[
+              `Reliability score: ${latestModel.reliabilityScore || 0}/100.`,
+              latestModel.modelErrorSummary?.available ? `Backtest worst error: ${Number(latestModel.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}%.` : "Backtest not available."
+            ]}
+          />
+        </div>
       )}
     </section>
   );

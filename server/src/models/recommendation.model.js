@@ -198,7 +198,7 @@ const recommendationSchema = new mongoose.Schema(
     },
     decisionLabel: {
       type: String,
-      enum: ["Recommended", "Use with caution", "Not reliable"],
+      enum: ["Recommended", "Use with caution", "Not reliable", "Not enough evidence"],
       default: "Use with caution"
     },
     objectiveExplanation: {
@@ -272,6 +272,26 @@ const recommendationSchema = new mongoose.Schema(
     predictionRange: {
       type: mongoose.Schema.Types.Mixed,
       default: {}
+    },
+    estimatedImprovementRange: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    modelReliabilityLabel: {
+      type: String,
+      default: ""
+    },
+    modelReliabilityReasons: {
+      type: [String],
+      default: []
+    },
+    evidenceSummary: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    profitUsesEstimatedCost: {
+      type: Boolean,
+      default: false
     },
     businessRiskLevel: {
       type: String,

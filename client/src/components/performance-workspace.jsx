@@ -46,8 +46,11 @@ import {
 } from "../utils/statusStyles";
 import {
   HorizontalBars,
+  CalculationWorkingPanel,
+  ExplainableNumber,
   MiniRevenueTrend,
   SummaryCard,
+  TrustBadge,
   WarningPanel
 } from "./common";
 
@@ -77,11 +80,27 @@ export function DashboardPanel({ dashboardData, dashboardState, dashboardMessage
       </section>
 
       <div className="shrink-0 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard icon={Database} label="Sales Rows" value={formatNumber(metrics.salesRecords)} note={`${formatNumber(metrics.totalUnits)} units sold`} />
-        <SummaryCard icon={TrendingUp} label="Total Revenue" value={formatCurrency(metrics.totalRevenue, currency)} note="From imported sales" />
-        <SummaryCard icon={Target} label="Total Profit" value={formatCurrency(metrics.totalProfit, currency)} note="Based on product costs" />
-        <SummaryCard icon={CheckCircle2} label="Recommendations" value={formatNumber(metrics.recommendationCount)} note={`${formatNumber(metrics.modelCount)} pricing insights ready`} />
+        <SummaryCard icon={Database} label="Sales Rows" value={<ExplainableNumber lines={["Count of imported sales transaction rows currently stored in the workspace.", `${formatNumber(metrics.totalUnits)} total units sold.`]}>{formatNumber(metrics.salesRecords)}</ExplainableNumber>} note={`${formatNumber(metrics.totalUnits)} units sold`} />
+        <SummaryCard icon={TrendingUp} label="Total Revenue" value={<ExplainableNumber lines={["Total revenue = sum of imported sales revenue.", "If revenue was missing in CSV, importer may calculate price x quantity."]}>{formatCurrency(metrics.totalRevenue, currency)}</ExplainableNumber>} note="From imported sales" />
+        <SummaryCard icon={Target} label="Total Profit" value={<ExplainableNumber lines={["Total profit = sum of (unit price - product cost) x quantity.", "Profit depends on cost quality in the uploaded data."]}>{formatCurrency(metrics.totalProfit, currency)}</ExplainableNumber>} note="Based on product costs" />
+        <SummaryCard icon={CheckCircle2} label="Recommendations" value={<ExplainableNumber lines={["Count of saved recommendation records.", `${formatNumber(metrics.modelCount)} pricing insights are available.`]}>{formatNumber(metrics.recommendationCount)}</ExplainableNumber>} note={`${formatNumber(metrics.modelCount)} pricing insights ready`} />
       </div>
+
+      <CalculationWorkingPanel
+        title="Show dashboard working"
+        summary="Dashboard numbers are direct aggregates from the active imported sales workspace."
+        formulas={[
+          "Sales rows = count of stored sales records.",
+          "Total revenue = sum of sales revenue across imported rows.",
+          "Total profit = sum of (price - cost) x quantity.",
+          "Top products, customer groups, categories, and months are ranked by summed revenue."
+        ]}
+        evidence={[
+          `${formatNumber(metrics.salesRecords)} sales rows.`,
+          `${formatNumber(metrics.totalUnits)} units sold.`,
+          `${formatNumber(metrics.modelCount)} pricing insights ready.`
+        ]}
+      />
 
       <div className="grid min-h-0 gap-4 xl:grid-cols-2">
         <section className="max-h-[360px] min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
@@ -140,8 +159,8 @@ export function HistoryPanel({ recommendations, historyState, historyMessage, cu
               <th className="py-3 pr-4 font-medium">Goal</th>
               <th className="py-3 pr-4 font-medium">Customer Group</th>
               <th className="py-3 pr-4 font-medium">Recommended Price</th>
-              <th className="py-3 pr-4 font-medium">Expected Revenue</th>
-              <th className="py-3 pr-4 font-medium">Expected Profit</th>
+              <th className="py-3 pr-4 font-medium">Estimated Revenue</th>
+              <th className="py-3 pr-4 font-medium">Estimated Profit</th>
               <th className="py-3 pr-4 font-medium">Outcome</th>
               <th className="py-3 pr-4 font-medium">Created</th>
               <th className="py-3 pr-4 font-medium">Action</th>
@@ -165,7 +184,10 @@ export function HistoryPanel({ recommendations, historyState, historyMessage, cu
                 <td className="py-3 pr-4 text-slate-600">{item.segmentLabel || formatSegmentName(item.segment)}</td>
                 <td className="py-3 pr-4 font-medium text-slate-900">{formatCurrency(item.recommendedPrice, currency)}</td>
                 <td className="py-3 pr-4 text-slate-600">{formatCurrency(item.expectedRevenue, currency)}</td>
-                <td className="py-3 pr-4 text-slate-600">{formatCurrency(item.expectedProfit, currency)}</td>
+                <td className="py-3 pr-4 text-slate-600">
+                  {formatCurrency(item.expectedProfit, currency)}
+                  {item.profitUsesEstimatedCost && <div className="mt-1"><TrustBadge label="Profit uses estimated cost" /></div>}
+                </td>
                 <td className="py-3 pr-4 text-slate-600">
                   {item.outcomeSummary?.measuredAt ? (
                     <div>
@@ -238,7 +260,7 @@ export function RecommendationPerformancePanel({ performance, state, message, cu
               <th className="p-3 font-medium">Status</th>
               <th className="p-3 font-medium">Applied Price</th>
               <th className="p-3 font-medium">Window</th>
-              <th className="p-3 font-medium">Expected Profit</th>
+              <th className="p-3 font-medium">Estimated Profit</th>
               <th className="p-3 font-medium">Actual Profit</th>
               <th className="p-3 font-medium">Units Error</th>
               <th className="p-3 font-medium">Rows</th>
@@ -262,7 +284,10 @@ export function RecommendationPerformancePanel({ performance, state, message, cu
                 <td className="p-3 text-slate-600">
                   {item.startDate ? new Date(item.startDate).toLocaleDateString() : "N/A"} - {item.endDate ? new Date(item.endDate).toLocaleDateString() : "N/A"}
                 </td>
-                <td className="p-3 text-slate-600">{formatCurrency(item.expectedProfit, currency)}</td>
+                <td className="p-3 text-slate-600">
+                  {formatCurrency(item.expectedProfit, currency)}
+                  {item.profitUsesEstimatedCost && <div className="mt-1"><TrustBadge label="Profit uses estimated cost" /></div>}
+                </td>
                 <td className="p-3 text-slate-600">{formatCurrency(item.actualProfit, currency)}</td>
                 <td className="p-3 text-slate-600">{formatPercent(item.predictionError || 0)}</td>
                 <td className="p-3 text-slate-600">{formatNumber(item.rowsMeasured || 0)}</td>

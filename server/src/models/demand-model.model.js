@@ -37,7 +37,7 @@ const demandModelSchema = new mongoose.Schema(
     formulaText: {
       type: String,
       required: true,
-      default: "Expected demand = baseline demand - price response x price"
+      default: "Estimated demand = baseline demand - price response x price"
     },
     featuresUsed: {
       type: [String],
@@ -140,13 +140,25 @@ const demandModelSchema = new mongoose.Schema(
     },
     reliabilityLabel: {
       type: String,
-      enum: ["Strong", "Usable", "Weak"],
+      enum: ["Strong", "Usable", "Usable, not backtested", "Weak"],
       required: true,
       default: "Weak"
     },
     reliabilityReasons: {
       type: [String],
       default: []
+    },
+    modelReliabilityLabel: {
+      type: String,
+      default: ""
+    },
+    modelReliabilityReasons: {
+      type: [String],
+      default: []
+    },
+    evidenceSummary: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
     },
     aggregationSummary: {
       type: mongoose.Schema.Types.Mixed,

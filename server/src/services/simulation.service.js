@@ -3,6 +3,7 @@ import { Product } from "../models/product.model.js";
 import { buildPredictionRange, summarizeBacktest } from "./data-fitness.service.js";
 import { fitDemandModel, getDemandModelWarnings, getInsightSummary, isSupportedSegment, predictDemandFromModel } from "./demand-model.service.js";
 import { getActiveImportBatchId } from "./import-batch.service.js";
+import { assessModelEvidence, getRecommendationDecision, profitUsesEstimatedCost } from "./trust-policy.service.js";
 import { formatSegmentLabel } from "../utils/segments.js";
 
 export function round(value, digits = 2) {
@@ -19,9 +20,10 @@ export function getSensitivityLabel(elasticity) {
 }
 
 export function getConfidenceLabel(model) {
-  if (model.rSquared >= 0.7) return "Strong";
-  if (model.rSquared >= 0.35) return "Usable";
-  return "Directional";
+  return assessModelEvidence({
+    ...model,
+    modelErrorSummary: summarizeBacktest(model.backtestMetrics || model.accuracyMetrics)
+  }).modelReliabilityLabel;
 }
 
 export function getModelWarnings(model) {
@@ -29,17 +31,14 @@ export function getModelWarnings(model) {
 }
 
 export function getResultDecisionLabel(model, warnings = [], demand = 1) {
-  const hasAbnormalResponse = model.modelType === "log-log" ? model.b >= 0 : model.b <= 0;
-
-  if (model.reliabilityLabel === "Weak" || hasAbnormalResponse || demand <= 0) {
-    return "Not reliable";
-  }
-
-  if (model.reliabilityLabel === "Usable" || warnings.length > 0) {
-    return "Use with caution";
-  }
-
-  return "Recommended";
+  return getRecommendationDecision({
+    model: {
+      ...model,
+      modelErrorSummary: summarizeBacktest(model.backtestMetrics || model.accuracyMetrics)
+    },
+    warnings,
+    demand
+  }).decisionLabel;
 }
 
 export function calculatePriceOutcome({ product, model, price, competitorPrice }) {
@@ -87,7 +86,101 @@ function getHistoricalRangeWarning(model, price) {
 function buildExplanation({ product, price, demand, revenue, profit, sensitivityLabel, confidenceLabel, warnings }) {
   const warningText = warnings.length ? ` ${warnings[0]}` : "";
 
-  return `${product.name} at $${round(price)} is expected to sell about ${round(demand)} units, generating $${round(revenue)} revenue and $${round(profit)} profit. Customer response is ${sensitivityLabel.toLowerCase()} with ${confidenceLabel.toLowerCase()} confidence.${warningText}`;
+  return `${product.name} at price ${round(price)} is estimated based on historical sales patterns to sell about ${round(demand)} units, generating ${round(revenue)} revenue and ${round(profit)} profit. Customer response is ${sensitivityLabel.toLowerCase()} with ${confidenceLabel.toLowerCase()} model reliability.${warningText}`;
+}
+
+function buildDemandWorking({ product, model, price, competitorPrice, demand, revenue, profit }) {
+  const numericPrice = Number(price);
+  const numericCompetitorPrice = Number(competitorPrice);
+  const cost = Number(product.cost || 0);
+
+  if (model.modelType === "context-adjusted" && model.contextModel?.features?.length) {
+    const rows = [];
+    let calculatedDemand = Number(model.contextModel.intercept || 0);
+
+    for (const feature of model.contextModel.features) {
+      let value = feature.baseline ?? 0;
+      let source = "Historical average";
+
+      if (feature.name === "price") {
+        value = numericPrice;
+        source = "Entered test price";
+      } else if (feature.name === "competitorGap" && Number.isFinite(numericCompetitorPrice)) {
+        value = (numericPrice - numericCompetitorPrice) / numericPrice;
+        source = "Entered competitor price";
+      }
+
+      const standardizedValue = (Number(value || 0) - Number(feature.mean || 0)) / (Number(feature.standardDeviation || 1) || 1);
+      const adjustment = standardizedValue * Number(feature.coefficient || 0);
+      calculatedDemand += adjustment;
+
+      if (Math.abs(adjustment) >= 0.01 || feature.name === "price" || feature.name === "competitorGap") {
+        rows.push({
+          feature: feature.label || feature.name,
+          source,
+          value: round(value, 4),
+          historicalAverage: round(feature.mean, 4),
+          adjustment: round(adjustment),
+          explanation: adjustment < 0 ? "Reduces demand" : adjustment > 0 ? "Increases demand" : "No change"
+        });
+      }
+    }
+
+    return {
+      modelType: "Context-adjusted price response",
+      baselineDemand: round(model.contextModel.intercept),
+      baselineFormula: "Baseline demand = model intercept learned from historical grouped demand points.",
+      baselineExplanation: "This is the model's starting demand when price, competitor gap, and other context fields are held at their historical average levels.",
+      adjustments: rows,
+      finalDemandFormula: `${round(model.contextModel.intercept)} ${rows.map((row) => `${row.adjustment >= 0 ? "+" : "-"} ${Math.abs(row.adjustment)}`).join(" ")} = ${round(demand)} units`,
+      calculatedDemand: round(calculatedDemand),
+      finalDemand: round(demand),
+      revenueFormula: `${round(numericPrice)} x ${round(demand)} = ${round(revenue)}`,
+      profitFormula: `(${round(numericPrice)} - ${round(cost)}) x ${round(demand)} = ${round(profit)}`,
+      plainEnglish: "The model starts from historical baseline demand, then adds or subtracts demand based on the tested price and competitor price. Other context fields stay at their historical average unless the simulator provides them."
+    };
+  }
+
+  if (model.modelType === "log-log") {
+    return {
+      modelType: "Log-log elasticity",
+      baselineDemand: null,
+      baselineFormula: "No separate baseline demand is shown because demand is calculated directly from the log-log price curve.",
+      baselineExplanation: "The log-log model estimates demand from the learned elasticity curve instead of starting from a fixed unit baseline.",
+      adjustments: [],
+      finalDemandFormula: `exp(${round(model.a, 4)} + ${round(model.b, 4)} x ln(${round(numericPrice)})) = ${round(demand)} units`,
+      calculatedDemand: round(demand),
+      finalDemand: round(demand),
+      revenueFormula: `${round(numericPrice)} x ${round(demand)} = ${round(revenue)}`,
+      profitFormula: `(${round(numericPrice)} - ${round(cost)}) x ${round(demand)} = ${round(profit)}`,
+      plainEnglish: "The model estimates demand using a price-elasticity curve learned from historical price and quantity patterns."
+    };
+  }
+
+  const priceAdjustment = -Number(model.b || 0) * numericPrice;
+
+  return {
+    modelType: "Simple price response",
+    baselineDemand: round(model.a),
+    baselineFormula: "Baseline demand = linear model intercept.",
+    baselineExplanation: "This is the starting demand learned from historical grouped demand points before subtracting the tested price effect.",
+    adjustments: [
+      {
+        feature: "Price",
+        source: "Entered test price",
+        value: round(numericPrice),
+        historicalAverage: null,
+        adjustment: round(priceAdjustment),
+        explanation: priceAdjustment < 0 ? "Reduces demand" : "Increases demand"
+      }
+    ],
+    finalDemandFormula: `${round(model.a)} - ${round(model.b, 4)} x ${round(numericPrice)} = ${round(demand)} units`,
+    calculatedDemand: round(demand),
+    finalDemand: round(demand),
+    revenueFormula: `${round(numericPrice)} x ${round(demand)} = ${round(revenue)}`,
+    profitFormula: `(${round(numericPrice)} - ${round(cost)}) x ${round(demand)} = ${round(profit)}`,
+    plainEnglish: "The model starts from baseline demand and subtracts the learned price effect."
+  };
 }
 
 export async function simulatePrice({ productId, price, competitorPrice, segment = "all" }) {
@@ -128,6 +221,15 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
         : 0;
       const revenue = numericPrice * demand;
       const profit = (numericPrice - product.cost) * demand;
+      const predictionRange = buildPredictionRange({
+        demand,
+        revenue,
+        profit,
+        price: numericPrice,
+        cost: product.cost,
+        model: { reliabilityLabel: "Weak" }
+      });
+      const costQuality = summary.costQuality || {};
 
       return {
         product: {
@@ -147,8 +249,21 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
         expectedDemand: round(demand),
         expectedRevenue: round(revenue),
         expectedProfit: round(profit),
+        estimatedDemand: round(demand),
+        estimatedRevenue: round(revenue),
+        estimatedProfit: round(profit),
         priceSensitivity: "Not available",
         confidence: "Not available",
+        modelReliabilityLabel: "Weak",
+        modelReliabilityReasons: summary.blockingReasons || ["No price-response model was available."],
+        evidenceSummary: {
+          groupedDemandPoints: Number(summary.summaryMetrics?.groupedDemandPoints || 0),
+          distinctPrices: Number(summary.summaryMetrics?.distinctPriceCount || 0),
+          dataFitness: summary.dataFitnessLabel || "Summary only",
+          backtest: "Not enough history",
+          costQuality: costQuality.label || "unknown"
+        },
+        profitUsesEstimatedCost: profitUsesEstimatedCost({ costQuality }),
         resultReliability: {
           label: "Weak",
           score: 0,
@@ -157,17 +272,11 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
         dataFitnessScore: summary.dataFitnessScore || 0,
         dataFitnessLabel: summary.dataFitnessLabel || "Summary only",
         businessRiskLevel: "High",
-        costQuality: summary.costQuality || {},
-        predictionRange: buildPredictionRange({
-          demand,
-          revenue,
-          profit,
-          price: numericPrice,
-          cost: product.cost,
-          model: { reliabilityLabel: "Weak" }
-        }),
+        costQuality,
+        predictionRange,
         modelErrorSummary: { available: false, label: "No model", message: "No model was available for this product." },
-        decisionLabel: "Not reliable",
+        decisionLabel: "Not enough evidence",
+        recommendationStatus: "not_enough_evidence",
         calculationSteps: [
           "No price-response model was available for this product.",
           `Used historical average demand per grouped demand point = ${round(demand)} units.`,
@@ -180,6 +289,19 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
           competitorAdjustment: 1,
           revenueFormula: `${round(numericPrice)} x ${round(demand)} = ${round(revenue)}`,
           profitFormula: `(${round(numericPrice)} - ${round(product.cost)}) x ${round(demand)} = ${round(profit)}`
+        },
+        demandWorking: {
+          modelType: "Business summary only",
+          baselineDemand: round(demand),
+          baselineFormula: `${round(summary.summaryMetrics?.unitsSold || 0)} units / ${round(summary.summaryMetrics?.groupedDemandPoints || 0)} grouped demand points`,
+          baselineExplanation: "No demand model was available, so the starting demand is the historical average units per grouped demand point.",
+          adjustments: [],
+          finalDemandFormula: `${round(summary.summaryMetrics?.unitsSold || 0)} units / ${round(summary.summaryMetrics?.groupedDemandPoints || 0)} grouped demand points = ${round(demand)} units`,
+          calculatedDemand: round(demand),
+          finalDemand: round(demand),
+          revenueFormula: `${round(numericPrice)} x ${round(demand)} = ${round(revenue)}`,
+          profitFormula: `(${round(numericPrice)} - ${round(product.cost)}) x ${round(demand)} = ${round(profit)}`,
+          plainEnglish: "No demand model was available, so this uses historical average demand only."
         },
         summaryMetrics: summary.summaryMetrics,
         warnings: [
@@ -215,6 +337,29 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
   if (model.dataFitnessLabel === "Recommendation blocked") {
     warnings.push("This simulation can be viewed as a scenario only; recommendation is blocked by the data fitness gate.");
   }
+  const modelErrorSummary = summarizeBacktest(model.backtestMetrics || model.accuracyMetrics);
+  const trustDecision = getRecommendationDecision({
+    model: { ...model, modelErrorSummary },
+    warnings,
+    demand
+  });
+  const predictionRange = buildPredictionRange({
+    demand,
+    revenue,
+    profit,
+    price: numericPrice,
+    cost: product.cost,
+    model: { ...model, reliabilityLabel: trustDecision.modelReliabilityLabel }
+  });
+  const demandWorking = buildDemandWorking({
+    product,
+    model,
+    price: numericPrice,
+    competitorPrice: numericCompetitorPrice,
+    demand,
+    revenue,
+    profit
+  });
 
   return {
     product: {
@@ -230,30 +375,31 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
     expectedDemand: round(demand),
     expectedRevenue: round(revenue),
     expectedProfit: round(profit),
+    estimatedDemand: round(demand),
+    estimatedRevenue: round(revenue),
+    estimatedProfit: round(profit),
     priceSensitivity: sensitivityLabel,
     confidence: confidenceLabel,
+    modelReliabilityLabel: trustDecision.modelReliabilityLabel,
+    modelReliabilityReasons: trustDecision.modelReliabilityReasons,
+    evidenceSummary: trustDecision.evidenceSummary,
+    profitUsesEstimatedCost: profitUsesEstimatedCost({ costQuality: model.costQuality || {}, product }),
     resultReliability: {
-      label: model.reliabilityLabel || "Weak",
+      label: trustDecision.modelReliabilityLabel,
       score: round(model.reliabilityScore || 0, 0),
-      reasons: model.reliabilityReasons || []
+      reasons: trustDecision.modelReliabilityReasons
     },
     dataFitnessScore: model.dataFitnessScore || 0,
     dataFitnessLabel: model.dataFitnessLabel || "Recommendation blocked",
     businessRiskLevel: model.businessRiskLevel || "High",
     costQuality: model.costQuality || {},
-    predictionRange: buildPredictionRange({
-      demand,
-      revenue,
-      profit,
-      price: numericPrice,
-      cost: product.cost,
-      model
-    }),
-    modelErrorSummary: summarizeBacktest(model.backtestMetrics || model.accuracyMetrics),
+    predictionRange,
+    modelErrorSummary,
     readinessLevel: model.readinessLevel || "Simple model ready",
     accuracyMetrics: model.accuracyMetrics || {},
     mlReadiness: model.mlReadiness || {},
-    decisionLabel: getResultDecisionLabel(model, warnings, demand),
+    decisionLabel: trustDecision.decisionLabel,
+    recommendationStatus: trustDecision.recommendationStatus,
     elasticity: elasticity === null ? null : round(elasticity, 3),
     modelType: model.modelType || "linear",
     formulaText: model.formulaText,
@@ -267,8 +413,8 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
         : competitorUsed
           ? `Competitor price was used by the learned context model because enough competitor variation existed.`
           : "Competitor price was shown as context only; no hardcoded competitor adjustment was applied.",
-      `Expected revenue = ${round(numericPrice)} x ${round(demand)} = ${round(revenue)}.`,
-      `Expected profit = (${round(numericPrice)} - ${round(product.cost)}) x ${round(demand)} = ${round(profit)}.`
+      `Estimated revenue = ${round(numericPrice)} x ${round(demand)} = ${round(revenue)}.`,
+      `Estimated profit = (${round(numericPrice)} - ${round(product.cost)}) x ${round(demand)} = ${round(profit)}.`
     ],
     calculationBreakdown: {
       demandFormula: model.modelType === "context-adjusted" ? `context-adjusted model at price ${round(numericPrice)}` : model.modelType === "log-log" ? `exp(${round(model.a, 4)} + ${round(model.b, 4)} x ln(${round(numericPrice)}))` : `${round(model.a, 4)} - ${round(model.b, 4)} x ${round(numericPrice)}`,
@@ -278,6 +424,7 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
       revenueFormula: `${round(numericPrice)} x ${round(demand)} = ${round(revenue)}`,
       profitFormula: `(${round(numericPrice)} - ${round(product.cost)}) x ${round(demand)} = ${round(profit)}`
     },
+    demandWorking,
     modelCreated,
     model: {
       recordsUsed: model.recordsUsed,
@@ -285,7 +432,7 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
       groupedDemandPoints: model.groupedDemandPoints,
       distinctPriceCount: model.distinctPriceCount,
       lastUpdated: model.lastUpdated,
-      confidenceScore: round(model.rSquared, 3),
+      modelReliabilityScore: round(model.rSquared, 3),
       priceRange: {
         min: round(model.priceRangeMin),
         max: round(model.priceRangeMax)

@@ -4,8 +4,9 @@ import { Recommendation } from "../models/recommendation.model.js";
 import { buildPredictionRange, summarizeBacktest } from "./data-fitness.service.js";
 import { fitDemandModel, isSupportedSegment } from "./demand-model.service.js";
 import { getActiveImportBatchId } from "./import-batch.service.js";
-import { calculatePriceOutcome, getConfidenceLabel, getModelWarnings, getResultDecisionLabel, round } from "./simulation.service.js";
+import { calculatePriceOutcome, getConfidenceLabel, getModelWarnings, round } from "./simulation.service.js";
 import { formatSegmentLabel } from "../utils/segments.js";
+import { buildEstimatedImprovementRange, getRecommendationDecision, profitUsesEstimatedCost } from "./trust-policy.service.js";
 
 const MAX_PRICE_POINTS = 101;
 const SEARCH_ITERATIONS = 48;
@@ -47,8 +48,12 @@ function buildExplanation({ product, recommendation, objective }) {
   };
   const metricLabel = objectiveLabels[objective] || "maximum profit";
   const direction = recommendation.improvementAmount >= 0 ? "increase" : "decrease";
+  const range = recommendation.estimatedImprovementRange;
+  const improvementText = range
+    ? `an estimated ${Math.abs(range.low).toFixed(1)}% to ${Math.abs(range.high).toFixed(1)}% ${direction} in the selected business metric`
+    : `an estimated ${Math.abs(recommendation.improvementPercent).toFixed(1)}% ${direction} in the selected business metric`;
 
-  return `${product.name}'s recommended price is $${recommendation.recommendedPrice} for ${metricLabel}. It is expected to ${direction} the selected business metric by ${Math.abs(recommendation.improvementPercent).toFixed(1)}% compared with the current price, using ${recommendation.groupedDemandPoints || recommendation.recordsUsed} grouped demand points and ${recommendation.confidence.toLowerCase()} model confidence.`;
+  return `${product.name}'s guarded price is ${recommendation.recommendedPrice} for ${metricLabel}. It is estimated based on historical sales patterns to produce ${improvementText} compared with the current price, using ${recommendation.groupedDemandPoints || recommendation.recordsUsed} grouped demand points and ${recommendation.modelReliabilityLabel || recommendation.confidence} model reliability.`;
 }
 
 function chooseObjectiveKey(objective) {
@@ -392,7 +397,6 @@ export async function recommendPrice({ productId, segment = "all", objective = "
   });
   const warnings = getModelWarnings(model);
   const { goodPriceRange, avoidPriceRange } = getGoodAndAvoidRanges(testedPrices, objectiveKey, best);
-  const decisionLabel = getResultDecisionLabel(model, warnings, best.expectedDemand);
   const nearbyPriceComparison = getNearbyPriceComparison(testedPrices, best, objectiveKey);
   const relatedProductWarnings = await getRelatedProductWarnings(product);
   const assumptions = [
@@ -421,11 +425,18 @@ export async function recommendPrice({ productId, segment = "all", objective = "
     cost: product.cost,
     model
   });
-  const recommendationStatus = decisionLabel === "Recommended"
-    ? "recommended"
-    : decisionLabel === "Use with caution"
-      ? "use_with_caution"
-      : "not_enough_evidence";
+  const trustDecision = getRecommendationDecision({
+    model: { ...model, modelErrorSummary },
+    warnings: [...warnings, ...guardrailWarnings],
+    demand: best.expectedDemand,
+    objective: effectiveObjective
+  });
+  const estimatedImprovementRange = buildEstimatedImprovementRange({
+    baselineMetric,
+    predictionRange,
+    objective: effectiveObjective
+  });
+  const usesEstimatedCost = profitUsesEstimatedCost({ costQuality: model.costQuality || { label: costQualityLabel }, product });
 
   const recommendationPayload = {
     productId,
@@ -445,6 +456,10 @@ export async function recommendPrice({ productId, segment = "all", objective = "
     improvementAmount,
     improvementPercent,
     confidence: getConfidenceLabel(model),
+    modelReliabilityLabel: trustDecision.modelReliabilityLabel,
+    modelReliabilityReasons: trustDecision.modelReliabilityReasons,
+    evidenceSummary: trustDecision.evidenceSummary,
+    profitUsesEstimatedCost: usesEstimatedCost,
     priceSensitivity: bestOutcome.sensitivityLabel,
     optimizationMethod,
     modelType: model.modelType,
@@ -455,14 +470,14 @@ export async function recommendPrice({ productId, segment = "all", objective = "
     groupedDemandPoints: model.groupedDemandPoints,
     distinctPriceCount: model.distinctPriceCount,
     resultReliability: {
-      label: model.reliabilityLabel || "Weak",
+      label: trustDecision.modelReliabilityLabel,
       score: round(model.reliabilityScore || 0, 0),
-      reasons: model.reliabilityReasons || []
+      reasons: trustDecision.modelReliabilityReasons
     },
     readinessLevel: model.readinessLevel || "Simple model ready",
     accuracyMetrics: model.accuracyMetrics || {},
     mlReadiness: model.mlReadiness || {},
-    decisionLabel,
+    decisionLabel: trustDecision.decisionLabel,
     objectiveExplanation: getObjectiveExplanation(effectiveObjective),
     nearbyPriceComparison,
     warnings,
@@ -471,16 +486,17 @@ export async function recommendPrice({ productId, segment = "all", objective = "
     relatedProductWarnings,
     modelLimitations: model.limitations || [],
     recommendationReliability: {
-      label: decisionLabel,
+      label: trustDecision.decisionLabel,
       score: round(model.reliabilityScore || 0, 0),
-      reasons: [...(model.reliabilityReasons || []), ...relatedProductWarnings]
+      reasons: [...trustDecision.modelReliabilityReasons, ...relatedProductWarnings]
     },
     testedPriceCount: testedPrices.length,
     goodPriceRange,
     avoidPriceRange,
     safePriceBand: goodPriceRange,
     predictionRange,
-    recommendationStatus,
+    estimatedImprovementRange,
+    recommendationStatus: trustDecision.recommendationStatus,
     businessRiskLevel: model.businessRiskLevel || "High",
     modelErrorSummary,
     dataFitnessScore: model.dataFitnessScore || 0,
@@ -490,7 +506,7 @@ export async function recommendPrice({ productId, segment = "all", objective = "
       `Tested ${testedPrices.length} prices from ${round(effectiveMinPrice)} to ${round(numericMaxPrice)} using a ${round(numericStep)} step.`,
       `Optimization method: ${optimizationMethod.replace("_", " ")}.`,
       `Objective: ${effectiveObjective.replace("_", " ")}.`,
-      `Best price ${best.price} produced ${best.expectedDemand} units, ${best.expectedRevenue} revenue, and ${best.expectedProfit} profit.`,
+      `Best price ${best.price} is estimated to produce ${best.expectedDemand} units, ${best.expectedRevenue} revenue, and ${best.expectedProfit} profit based on historical sales patterns.`,
       `Model used: ${model.modelType === "context-adjusted" ? "Context-Adjusted Price Response Model" : model.modelType === "log-log" ? "Log-Log Elasticity Model" : "Simple Price Response Model"} with ${model.recordsUsed} records.`
     ],
     testedPrices

@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { login } from "../lib/api";
-import { objectiveOptions, sidebarItems } from "../config/navigation";
+import { getObjectiveLabel, objectiveOptions, sidebarItems } from "../config/navigation";
 import {
   formatCurrency,
   formatNumber,
@@ -46,6 +46,8 @@ import {
 } from "../utils/statusStyles";
 import {
   HorizontalBars,
+  CalculationWorkingPanel,
+  ExplainableNumber,
   MiniRevenueTrend,
   SummaryCard,
   WarningPanel
@@ -158,14 +160,6 @@ export function HomeOverview({
         </div>
         {dashboardMessage && dashboardState === "error" && <p className="mt-3 text-sm text-rose-700">{dashboardMessage}</p>}
         {resetMessage && <p className={`mt-3 text-sm ${resetState === "error" ? "text-rose-700" : "text-emerald-700"}`}>{resetMessage}</p>}
-        <div className="mt-4 grid gap-2 border-t border-slate-100 pt-4 sm:grid-cols-5">
-          {businessFlow.map((item, index) => (
-            <div key={item} className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-medium uppercase text-slate-500">Step {index + 1}</p>
-              <p className="mt-1 text-sm font-medium text-slate-900">{item}</p>
-            </div>
-          ))}
-        </div>
       </section>
 
       {isEmpty && (
@@ -228,15 +222,31 @@ export function HomeOverview({
         {activeHomeTab === "overview" && (
           <div className="grid min-h-0 gap-4">
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <SummaryCard icon={TrendingUp} label="Total Revenue" value={formatCurrency(metrics.totalRevenue, currency)} note="From imported sales" />
-              <SummaryCard icon={Target} label="Total Profit" value={formatCurrency(metrics.totalProfit, currency)} note="After product costs" />
-              <SummaryCard icon={Database} label="Sales Rows" value={formatNumber(salesRecords)} note={`${formatNumber(metrics.totalUnits)} units sold`} />
-              <SummaryCard icon={CheckCircle2} label="Pricing Insights Ready" value={formatNumber(modelCount)} note={`${formatNumber(metrics.recommendationCount)} recommendations saved`} />
-              <SummaryCard icon={Gauge} label="Model-Ready Products" value={formatNumber(metrics.modelReadyProducts || 0)} note="Ready or limited for insight" />
-              <SummaryCard icon={X} label="Summary-Only Products" value={formatNumber(metrics.summaryOnlyProducts || 0)} note="Need more price variation" />
+              <SummaryCard icon={TrendingUp} label="Total Revenue" value={<ExplainableNumber lines={["Total revenue = sum of imported sales revenue.", "Used for dashboard and top-product ranking."]}>{formatCurrency(metrics.totalRevenue, currency)}</ExplainableNumber>} note="From imported sales" />
+              <SummaryCard icon={Target} label="Total Profit" value={<ExplainableNumber lines={["Total profit = sum of (price - cost) x quantity.", "If cost is estimated, profit is less reliable."]}>{formatCurrency(metrics.totalProfit, currency)}</ExplainableNumber>} note="After product costs" />
+              <SummaryCard icon={Database} label="Sales Rows" value={<ExplainableNumber lines={["Sales rows = count of imported sales records.", `${formatNumber(metrics.totalUnits)} total units sold.`]}>{formatNumber(salesRecords)}</ExplainableNumber>} note={`${formatNumber(metrics.totalUnits)} units sold`} />
+              <SummaryCard icon={CheckCircle2} label="Pricing Insights Ready" value={<ExplainableNumber lines={["Count of fitted pricing insight records.", `${formatNumber(metrics.recommendationCount)} saved recommendations.`]}>{formatNumber(modelCount)}</ExplainableNumber>} note={`${formatNumber(metrics.recommendationCount)} recommendations saved`} />
+              <SummaryCard icon={Gauge} label="Model-Ready Products" value={<ExplainableNumber lines={["Products with enough history and price variation for insight creation.", "This does not guarantee a final recommendation."]}>{formatNumber(metrics.modelReadyProducts || 0)}</ExplainableNumber>} note="Ready or limited for insight" />
+              <SummaryCard icon={X} label="Summary-Only Products" value={<ExplainableNumber lines={["Products with sales summary but not enough price variation for a demand model.", "They can show business summary only."]}>{formatNumber(metrics.summaryOnlyProducts || 0)}</ExplainableNumber>} note="Need more price variation" />
               <SummaryCard icon={Package} label="Top Revenue Product" value={dashboardData?.businessHighlights?.topRevenueProduct?.name || "Not available"} note={dashboardData?.businessHighlights?.topRevenueProduct ? formatCurrency(dashboardData.businessHighlights.topRevenueProduct.revenue, currency) : "Upload data first"} />
               <SummaryCard icon={BadgeDollarSign} label="Highest Profit Product" value={dashboardData?.businessHighlights?.topProfitProduct?.name || "Not available"} note={dashboardData?.businessHighlights?.topProfitProduct ? formatCurrency(dashboardData.businessHighlights.topProfitProduct.profit, currency) : "Upload data first"} />
             </div>
+
+            <CalculationWorkingPanel
+              title="Show home snapshot working"
+              summary="The home snapshot is not a separate model. It summarizes imported sales, fitted pricing insights, and saved recommendations."
+              formulas={[
+                "Revenue = sum of imported row revenue.",
+                "Profit = sum of (price - cost) x quantity.",
+                "Model-ready products = products passing readiness checks for pricing insight creation.",
+                "Summary-only products = products with sales data but insufficient price variation."
+              ]}
+              evidence={[
+                `${formatNumber(salesRecords)} sales rows.`,
+                `${formatNumber(metrics.totalUnits)} units sold.`,
+                `${formatNumber(modelCount)} pricing insights ready.`
+              ]}
+            />
 
             <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.9fr)]">
               <section className="min-h-0 rounded-lg border border-slate-200 bg-white p-4">
@@ -338,7 +348,7 @@ export function HomeOverview({
                         <span className="font-medium text-slate-900">{formatCurrency(item.recommendedPrice, currency)}</span>
                       </div>
                       <div className="flex justify-between gap-3">
-                        <span className="text-slate-500">Expected profit</span>
+                        <span className="text-slate-500">Estimated profit</span>
                         <span className="font-medium text-slate-900">{formatCurrency(item.expectedProfit, currency)}</span>
                       </div>
                     </div>

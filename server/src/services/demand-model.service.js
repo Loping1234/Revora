@@ -1,8 +1,10 @@
+import mongoose from "mongoose";
 import { DemandModel } from "../models/demand-model.model.js";
 import { Product } from "../models/product.model.js";
 import { SalesData } from "../models/sales-data.model.js";
 import { assessDataFitness, buildPredictionRange, summarizeBacktest } from "./data-fitness.service.js";
 import { getActiveImportBatchFilter } from "./import-batch.service.js";
+import { assessModelEvidence } from "./trust-policy.service.js";
 import { isValidSegment } from "../utils/segments.js";
 
 export function isSupportedSegment(segment) {
@@ -41,7 +43,7 @@ export function getDemandModelWarnings(model) {
   }
 
   if (model.recordsUsed < 10) {
-    warnings.push("More repeated sales rows for this product and customer group would improve confidence.");
+    warnings.push("More repeated sales rows for this product and customer group would improve model reliability.");
   }
 
   return warnings;
@@ -432,7 +434,7 @@ export function assessModelReliability({ model, groupedRecords, rawRowsUsed, exc
 
   if (model.rSquared >= 0.7) score += 25;
   else if (model.rSquared >= 0.35) score += 15;
-  else reasons.push("Sales pattern is noisy, so confidence is low.");
+  else reasons.push("Sales pattern is noisy, so model reliability is low.");
 
   if (normalResponse) score += 20;
   else reasons.push("Demand does not fall when price increases in the uploaded data.");
@@ -452,7 +454,7 @@ export function assessModelReliability({ model, groupedRecords, rawRowsUsed, exc
       : "Weak";
 
   if (!reasons.length) {
-    reasons.push(label === "Strong" ? "Enough demand points, price variation, and confidence for a strong estimate." : "Enough data for a usable directional pricing estimate.");
+    reasons.push(label === "Strong" ? "Enough demand points, price variation, and historical fit for a strong estimate." : "Enough data for a usable directional pricing estimate.");
   }
 
   return {
@@ -567,7 +569,8 @@ function assessReadinessGate({ rawRecords, usableRecords, groupedRecords, traini
 export async function getInsightSummary({ productId, segment = "all" }) {
   const activeImportBatchFilter = await getActiveImportBatchFilter();
   const query = {
-    ...(segment === "all" ? { productId } : { productId, customerSegment: segment }),
+    productId: typeof productId === "string" ? new mongoose.Types.ObjectId(productId) : productId,
+    ...(segment !== "all" && { customerSegment: segment }),
     ...activeImportBatchFilter
   };
   const [summary, groupedRecords, product] = await Promise.all([
@@ -889,7 +892,7 @@ export function fitContextAdjustedDemand(records) {
     b: -priceCoefficient,
     modelType: "context-adjusted",
     modelFamily: "context_adjusted",
-    formulaText: `Expected demand = context-adjusted baseline using ${featuresUsed.join(", ")}`,
+    formulaText: `Estimated demand = context-adjusted baseline using ${featuresUsed.join(", ")}`,
     stdErr,
     rSquared,
     recordsUsed: n,
@@ -955,7 +958,7 @@ export function fitLinearDemand(records) {
     promotionUsed: false,
     competitorUsed: false,
     limitations: ["This simple model assumes price is the main driver of demand."],
-    formulaText: `Expected demand = ${a.toFixed(2)} - ${b.toFixed(4)} x price`,
+    formulaText: `Estimated demand = ${a.toFixed(2)} - ${b.toFixed(4)} x price`,
     stdErr,
     rSquared,
     recordsUsed: n
@@ -1002,7 +1005,7 @@ export function fitLogLogDemand(records) {
     promotionUsed: false,
     competitorUsed: false,
     limitations: ["This elasticity model still assumes price is the main driver of demand."],
-    formulaText: `Expected demand = exp(${a.toFixed(2)} + ${b.toFixed(4)} x ln(price))`,
+    formulaText: `Estimated demand = exp(${a.toFixed(2)} + ${b.toFixed(4)} x ln(price))`,
     stdErr,
     rSquared,
     recordsUsed: n
@@ -1040,7 +1043,7 @@ function selectDemandModel(records) {
   const contextFixesBadSimple = contextAdjusted && !simpleNormal && contextAdjusted.rSquared >= 0.35 && contextNormal;
   const selected = contextAddsValue || contextFixesBadSimple ? contextAdjusted : bestSimple;
   const selectedReason = selected.modelType === "context-adjusted"
-    ? "Selected because context features improved confidence while preserving normal price response."
+    ? "Selected because context features improved historical fit while preserving normal price response."
     : "Selected because the context-adjusted model was unavailable, weaker, or less business-safe.";
 
   selected.modelComparison = {
@@ -1145,7 +1148,8 @@ export async function fitDemandModel({ productId, segment = "all" }) {
 
   const activeImportBatchFilter = await getActiveImportBatchFilter();
   const query = {
-    ...(segment === "all" ? { productId } : { productId, customerSegment: segment }),
+    productId: typeof productId === "string" ? new mongoose.Types.ObjectId(productId) : productId,
+    ...(segment !== "all" && { customerSegment: segment }),
     ...activeImportBatchFilter
   };
   const [summary, groupedRecords, product] = await Promise.all([
@@ -1234,6 +1238,23 @@ export async function fitDemandModel({ productId, segment = "all" }) {
     accuracyMetrics,
     excludedRows
   });
+  const modelErrorSummary = summarizeBacktest(accuracyMetrics);
+  const evidence = assessModelEvidence({
+    ...coefficients,
+    ...reliability,
+    groupedDemandPoints: groupedRecords.length,
+    distinctPriceCount,
+    dataFitnessLabel: dataFitness.dataFitnessLabel,
+    costQuality: dataFitness.costQuality,
+    modelErrorSummary
+  });
+  const evidenceReliability = {
+    reliabilityLabel: evidence.modelReliabilityLabel,
+    reliabilityReasons: evidence.modelReliabilityReasons,
+    modelReliabilityLabel: evidence.modelReliabilityLabel,
+    modelReliabilityReasons: evidence.modelReliabilityReasons,
+    evidenceSummary: evidence.evidenceSummary
+  };
   const averageDemandPrediction = Math.max(0, predictDemandFromModel(coefficients, trainingSummary.averagePrice || product.basePrice));
   const averageRevenuePrediction = (trainingSummary.averagePrice || product.basePrice) * averageDemandPrediction;
   const averageProfitPrediction = ((trainingSummary.averagePrice || product.basePrice) - product.cost) * averageDemandPrediction;
@@ -1243,7 +1264,7 @@ export async function fitDemandModel({ productId, segment = "all" }) {
     profit: averageProfitPrediction,
     price: trainingSummary.averagePrice || product.basePrice,
     cost: product.cost,
-    model: { ...coefficients, ...reliability, accuracyMetrics }
+    model: { ...coefficients, ...reliability, ...evidenceReliability, accuracyMetrics }
   });
   const aggregationSummary = {
     rawRowsUsed: usableRows,
@@ -1276,6 +1297,7 @@ export async function fitDemandModel({ productId, segment = "all" }) {
       groupedDemandPoints: groupedRecords.length,
       distinctPriceCount,
       ...reliability,
+      ...evidenceReliability,
       aggregationSummary,
       activeImportBatchId: activeImportBatchFilter.importBatchId || null,
       dataFitnessScore: dataFitness.dataFitnessScore,
@@ -1307,6 +1329,9 @@ export async function fitDemandModel({ productId, segment = "all" }) {
     resultMode: "Price Response Model",
     backtestMetrics: model.backtestMetrics || model.accuracyMetrics,
     modelErrorSummary: summarizeBacktest(model.backtestMetrics || model.accuracyMetrics),
+    modelReliabilityLabel: model.modelReliabilityLabel || model.reliabilityLabel,
+    modelReliabilityReasons: model.modelReliabilityReasons || model.reliabilityReasons,
+    evidenceSummary: model.evidenceSummary,
     warnings: [...getDemandModelWarnings(model), ...(model.dataFitnessWarnings || [])]
   };
 }

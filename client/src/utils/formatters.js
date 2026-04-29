@@ -39,7 +39,9 @@ export function getPriceSensitivityLabel(model) {
 
 export function getConfidenceLabel(model) {
   if (!model) return "Not measured";
+  if (model.modelReliabilityLabel) return model.modelReliabilityLabel;
+  if (model.reliabilityLabel) return model.reliabilityLabel;
   if (model.rSquared >= 0.7) return "Strong";
   if (model.rSquared >= 0.35) return "Usable";
-  return "Directional";
+  return "Weak";
 }

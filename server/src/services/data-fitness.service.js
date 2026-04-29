@@ -116,7 +116,7 @@ export function assessDataFitness({
 
     if (model.rSquared >= 0.7) score += 8;
     else if (model.rSquared >= 0.35) score += 4;
-    else warnings.push("Model confidence is low.");
+    else warnings.push("Model reliability is low.");
   }
 
   if (accuracyMetrics?.available) {
@@ -159,8 +159,10 @@ export function errorRateFromModel(model = {}) {
     return clamp(Math.max(demandError, 0.08), 0.08, 0.7);
   }
 
-  if (model.reliabilityLabel === "Strong") return 0.15;
-  if (model.reliabilityLabel === "Usable") return 0.25;
+  const reliabilityLabel = model.modelReliabilityLabel || model.reliabilityLabel;
+  if (reliabilityLabel === "Strong") return 0.15;
+  if (reliabilityLabel === "Usable") return 0.25;
+  if (reliabilityLabel === "Usable, not backtested") return 0.3;
   return 0.45;
 }
 

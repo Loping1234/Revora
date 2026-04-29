@@ -46,6 +46,7 @@ import {
 } from "../utils/statusStyles";
 import {
   HorizontalBars,
+  ExplainableNumber,
   MiniRevenueTrend,
   SummaryCard,
   WarningPanel
@@ -204,21 +205,44 @@ export function ProductsTable({ products, productError, currency }) {
                   <p className="text-xs text-slate-500">{product.sku}</p>
                 </td>
                 <td className="py-2 pr-4 text-slate-600">{product.category}</td>
-                <td className="py-2 pr-4 text-slate-600">{formatCurrency(product.basePrice, currency)}</td>
-                <td className="py-2 pr-4 text-slate-600">{formatCurrency(product.cost, currency)}</td>
+                <td className="py-2 pr-4 text-slate-600">
+                  <ExplainableNumber lines={["Current/base product price stored for this product.", "Used as baseline price in simulations and recommendations."]}>
+                    {formatCurrency(product.basePrice, currency)}
+                  </ExplainableNumber>
+                </td>
+                <td className="py-2 pr-4 text-slate-600">
+                  <ExplainableNumber lines={["Product cost used for profit calculations.", product.costQuality ? `Cost quality: ${product.costQuality}.` : "If cost was missing, profit may use an estimated cost."]}>
+                    {formatCurrency(product.cost, currency)}
+                  </ExplainableNumber>
+                </td>
                 <td className="py-2 pr-4">
                   <span className={`rounded-md px-2 py-1 text-xs font-medium ${product.inventory < 50 ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
-                    {product.inventory} units
+                    <ExplainableNumber lines={["Inventory/stock value imported or stored for this product.", "Low stock may make demand modeling less reliable."]}>
+                      {product.inventory} units
+                    </ExplainableNumber>
                   </span>
                 </td>
-                <td className="py-2 pr-4 text-slate-600">{product.salesRecords}</td>
+                <td className="py-2 pr-4 text-slate-600">
+                  <ExplainableNumber lines={["Sales rows = imported transaction rows linked to this product.", "Rows may still be excluded from modeling if stockout or invalid."]}>
+                    {product.salesRecords}
+                  </ExplainableNumber>
+                </td>
                 <td className="py-2 pr-4">
                   <span className={`rounded-md px-2 py-1 text-xs font-medium ${getReadinessStyles(product.readiness?.status)}`}>
-                    {product.readiness?.status || "Not ready"}
+                    <ExplainableNumber lines={[
+                      product.readiness?.reason || "No imported sales rows yet.",
+                      ...(product.readiness?.warnings || []).slice(0, 2)
+                    ]}>
+                      {product.readiness?.status || "Not ready"}
+                    </ExplainableNumber>
                   </span>
                   <p className="mt-1 max-w-44 text-xs text-slate-500">{product.readiness?.reason || "No imported sales rows yet."}</p>
                 </td>
-                <td className="py-2 pr-4 text-slate-600">{product.fittedModels || 0}</td>
+                <td className="py-2 pr-4 text-slate-600">
+                  <ExplainableNumber lines={["Number of fitted pricing insights/models available for this product.", "Usually varies by customer segment."]}>
+                    {product.fittedModels || 0}
+                  </ExplainableNumber>
+                </td>
               </tr>
             ))}
             {!visibleProducts.length && (
@@ -497,7 +521,7 @@ export function ProductRelationshipsPanel({ relationships, state, message, refre
               <th className="p-3 font-medium">Product B</th>
               <th className="p-3 font-medium">Category</th>
               <th className="p-3 font-medium">Relationship</th>
-              <th className="p-3 font-medium">Confidence</th>
+              <th className="p-3 font-medium">Evidence</th>
               <th className="p-3 font-medium">Overlap</th>
               <th className="p-3 font-medium">Correlation</th>
             </tr>

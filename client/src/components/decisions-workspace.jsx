@@ -46,12 +46,41 @@ import {
 } from "../utils/statusStyles";
 import {
   HorizontalBars,
+  CalculationWorkingPanel,
+  ExplainableNumber,
   MiniRevenueTrend,
   SectionHeader,
   SummaryCard,
+  TrustBadge,
   TrustStrip,
   WarningPanel
 } from "./common";
+
+function formatImprovementRange(range, fallback) {
+  if (range && Number.isFinite(Number(range.low)) && Number.isFinite(Number(range.high))) {
+    return `${Number(range.low).toFixed(1)}% to ${Number(range.high).toFixed(1)}%`;
+  }
+
+  return formatPercent(fallback);
+}
+
+function workingFormulaLines(working) {
+  if (!working) return [];
+
+  return [
+    working.finalDemandFormula ? `Demand: ${working.finalDemandFormula}` : null,
+    working.revenueFormula ? `Revenue: ${working.revenueFormula}` : null,
+    working.profitFormula ? `Profit: ${working.profitFormula}` : null
+  ].filter(Boolean);
+}
+
+function workingEvidenceLines(result) {
+  return [
+    result?.evidenceSummary ? `${result.evidenceSummary.groupedDemandPoints} grouped demand points, ${result.evidenceSummary.distinctPrices} price levels.` : null,
+    result?.modelErrorSummary?.available ? `Backtest worst error: ${Number(result.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}%.` : null,
+    result?.profitUsesEstimatedCost ? "Profit uses estimated cost." : null
+  ].filter(Boolean);
+}
 
 export function PriceSimulatorPanel({
   products,
@@ -151,20 +180,50 @@ export function PriceSimulatorPanel({
           />
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs uppercase text-slate-500">Expected demand</p>
-              <p className="mt-1 text-xl font-semibold">{simulationResult.expectedDemand} units</p>
+              <p className="text-xs uppercase text-slate-500">Estimated demand</p>
+              <p className="mt-1 text-xl font-semibold">
+                <ExplainableNumber lines={[
+                  simulationResult.demandWorking?.finalDemandFormula,
+                  simulationResult.demandWorking?.plainEnglish
+                ]}>
+                  {simulationResult.expectedDemand} units
+                </ExplainableNumber>
+              </p>
             </div>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs uppercase text-slate-500">Expected revenue</p>
-              <p className="mt-1 text-xl font-semibold">{formatCurrency(simulationResult.expectedRevenue, currency)}</p>
+              <p className="text-xs uppercase text-slate-500">Estimated revenue</p>
+              <p className="mt-1 text-xl font-semibold">
+                <ExplainableNumber lines={[
+                  simulationResult.demandWorking?.revenueFormula,
+                  "Revenue = tested price x estimated demand."
+                ]}>
+                  {formatCurrency(simulationResult.expectedRevenue, currency)}
+                </ExplainableNumber>
+              </p>
             </div>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs uppercase text-slate-500">Expected profit</p>
-              <p className="mt-1 text-xl font-semibold">{formatCurrency(simulationResult.expectedProfit, currency)}</p>
+              <p className="text-xs uppercase text-slate-500">Estimated profit</p>
+              <p className="mt-1 text-xl font-semibold">
+                <ExplainableNumber lines={[
+                  simulationResult.demandWorking?.profitFormula,
+                  "Profit = (tested price - product cost) x estimated demand.",
+                  simulationResult.profitUsesEstimatedCost ? "Warning: product cost is estimated." : null
+                ]}>
+                  {formatCurrency(simulationResult.expectedProfit, currency)}
+                </ExplainableNumber>
+              </p>
+              {simulationResult.profitUsesEstimatedCost && <div className="mt-2"><TrustBadge label="Profit uses estimated cost" /></div>}
             </div>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs uppercase text-slate-500">Customer response</p>
-              <p className="mt-1 text-xl font-semibold">{simulationResult.priceSensitivity}</p>
+              <p className="mt-1 text-xl font-semibold">
+                <ExplainableNumber lines={[
+                  `Price response score: ${simulationResult.elasticity ?? "Not available"}.`,
+                  "Higher sensitivity means demand changes more strongly when price changes."
+                ]}>
+                  {simulationResult.priceSensitivity}
+                </ExplainableNumber>
+              </p>
             </div>
           </div>
 
@@ -174,7 +233,7 @@ export function PriceSimulatorPanel({
               <p className="mt-2 text-sm leading-6 text-slate-600">This estimates revenue and profit at one chosen price, using the fitted customer price response model.</p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <p className="text-sm font-medium text-slate-900">Trust level</p>
+              <p className="text-sm font-medium text-slate-900">What evidence supports this?</p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <span className={`rounded-md px-2 py-1 text-sm font-semibold ${getReliabilityStyles(simulationResult.decisionLabel)}`}>
                   {simulationResult.decisionLabel || "Use with caution"}
@@ -186,19 +245,106 @@ export function PriceSimulatorPanel({
                 {simulationResult.dataFitnessLabel && <span className="rounded-md bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-700">{simulationResult.dataFitnessLabel}</span>}
               </div>
               {simulationResult.resultReliability?.reasons?.length > 0 && <p className="mt-2 text-sm text-slate-600">{simulationResult.resultReliability.reasons[0]}</p>}
+              {simulationResult.evidenceSummary && (
+                <p className="mt-2 text-sm text-slate-600">
+                  Evidence: {simulationResult.evidenceSummary.groupedDemandPoints} grouped points, {simulationResult.evidenceSummary.distinctPrices} price levels, {simulationResult.evidenceSummary.backtest}.
+                </p>
+              )}
               {simulationResult.modelErrorSummary?.available && <p className="mt-2 text-sm text-slate-600">Backtest worst error: {Number(simulationResult.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}%</p>}
             </div>
           </div>
 
           {simulationResult.predictionRange?.demand && (
             <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <p className="text-sm font-medium text-slate-900">Expected range, not just one number</p>
+              <p className="text-sm font-medium text-slate-900">Estimated range, not just one number</p>
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">Demand: {simulationResult.predictionRange.demand.low} to {simulationResult.predictionRange.demand.high} units</p>
                 <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">Revenue: {formatCurrency(simulationResult.predictionRange.revenue.low, currency)} to {formatCurrency(simulationResult.predictionRange.revenue.high, currency)}</p>
                 <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">Profit: {formatCurrency(simulationResult.predictionRange.profit.low, currency)} to {formatCurrency(simulationResult.predictionRange.profit.high, currency)}</p>
               </div>
             </div>
+          )}
+
+          {simulationResult.demandWorking && (
+            <details className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600" open>
+              <summary className="cursor-pointer text-sm font-semibold text-slate-900">Show working</summary>
+              <div className="mt-3 grid gap-4">
+                <p className="leading-6">{simulationResult.demandWorking.plainEnglish}</p>
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-md bg-slate-50 p-3">
+                    <p className="text-xs uppercase text-slate-500">Model used</p>
+                    <p className="mt-1 font-semibold text-slate-900">{simulationResult.demandWorking.modelType}</p>
+                  </div>
+                  <div className="rounded-md bg-slate-50 p-3">
+                    <p className="text-xs uppercase text-slate-500">Starting demand</p>
+                    <p className="mt-1 font-semibold text-slate-900">
+                      <ExplainableNumber lines={[
+                        simulationResult.demandWorking.baselineFormula,
+                        simulationResult.demandWorking.baselineExplanation
+                      ]}>
+                        {simulationResult.demandWorking.baselineDemand ?? "Not shown"} units
+                      </ExplainableNumber>
+                    </p>
+                  </div>
+                  <div className="rounded-md bg-slate-50 p-3">
+                    <p className="text-xs uppercase text-slate-500">Final demand</p>
+                    <p className="mt-1 font-semibold text-slate-900">{simulationResult.demandWorking.finalDemand} units</p>
+                  </div>
+                  <div className="rounded-md bg-slate-50 p-3">
+                    <p className="text-xs uppercase text-slate-500">Product cost used</p>
+                    <p className="mt-1 font-semibold text-slate-900">{formatCurrency(simulationResult.product?.cost || 0, currency)}</p>
+                  </div>
+                </div>
+
+                {(simulationResult.demandWorking.baselineFormula || simulationResult.demandWorking.baselineExplanation) && (
+                  <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
+                    <p className="text-xs font-medium uppercase text-slate-500">How baseline demand was calculated</p>
+                    {simulationResult.demandWorking.baselineFormula && (
+                      <p className="mt-2 font-semibold text-slate-900">{simulationResult.demandWorking.baselineFormula}</p>
+                    )}
+                    {simulationResult.demandWorking.baselineExplanation && (
+                      <p className="mt-1 leading-6">{simulationResult.demandWorking.baselineExplanation}</p>
+                    )}
+                  </div>
+                )}
+
+                {simulationResult.demandWorking.adjustments?.length > 0 && (
+                  <div className="overflow-x-auto rounded-md border border-slate-100">
+                    <table className="w-full min-w-[720px] text-left text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2">Factor</th>
+                          <th className="px-3 py-2">Value used</th>
+                          <th className="px-3 py-2">Historical average</th>
+                          <th className="px-3 py-2">Demand change</th>
+                          <th className="px-3 py-2">Meaning</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {simulationResult.demandWorking.adjustments.map((row) => (
+                          <tr key={`${row.feature}-${row.source}`}>
+                            <td className="px-3 py-2 font-medium text-slate-900">{row.feature}</td>
+                            <td className="px-3 py-2">{row.value}</td>
+                            <td className="px-3 py-2">{row.historicalAverage ?? "Not applicable"}</td>
+                            <td className={`px-3 py-2 font-semibold ${Number(row.adjustment) < 0 ? "text-rose-700" : Number(row.adjustment) > 0 ? "text-emerald-700" : "text-slate-600"}`}>
+                              {Number(row.adjustment) > 0 ? "+" : ""}{row.adjustment} units
+                            </td>
+                            <td className="px-3 py-2">{row.explanation}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="grid gap-2 rounded-md bg-slate-50 p-3">
+                  <p><span className="font-semibold text-slate-900">Demand:</span> {simulationResult.demandWorking.finalDemandFormula}</p>
+                  <p><span className="font-semibold text-slate-900">Revenue:</span> {simulationResult.demandWorking.revenueFormula}</p>
+                  <p><span className="font-semibold text-slate-900">Profit:</span> {simulationResult.demandWorking.profitFormula}</p>
+                </div>
+              </div>
+            </details>
           )}
 
           <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -212,7 +358,7 @@ export function PriceSimulatorPanel({
             <summary className="cursor-pointer font-medium text-slate-800">How this was calculated</summary>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <p>Model: {simulationResult.modelType === "log-log" ? "Log-Log Elasticity Model" : "Simple Price Response Model"}</p>
-              <p>Confidence: {simulationResult.confidence}</p>
+              <p>Model reliability: {simulationResult.modelReliabilityLabel || simulationResult.confidence}</p>
               <p>Records used: {simulationResult.model?.recordsUsed || simulationResult.summaryMetrics?.usableRows || 0}</p>
               <p>Raw rows used: {simulationResult.model?.rawRowsUsed || simulationResult.summaryMetrics?.rawRows || 0}</p>
               <p>Grouped demand points: {simulationResult.model?.groupedDemandPoints || simulationResult.summaryMetrics?.groupedDemandPoints || 0}</p>
@@ -328,19 +474,58 @@ export function ScenarioPlannerPanel({
                 <div className="mt-4 grid gap-3">
                   <div className="rounded-md bg-slate-50 p-3">
                     <p className="text-xs uppercase text-slate-500">Demand</p>
-                    <p className="mt-1 text-lg font-semibold">{scenario.expectedDemand} units</p>
+                    <p className="mt-1 text-lg font-semibold">
+                      <ExplainableNumber lines={[scenario.demandWorking?.finalDemandFormula, scenario.demandWorking?.plainEnglish]}>
+                        {scenario.expectedDemand} units
+                      </ExplainableNumber>
+                    </p>
                   </div>
                   <div className="rounded-md bg-slate-50 p-3">
                     <p className="text-xs uppercase text-slate-500">Revenue</p>
-                    <p className="mt-1 text-lg font-semibold">{formatCurrency(scenario.expectedRevenue, currency)}</p>
+                    <p className="mt-1 text-lg font-semibold">
+                      <ExplainableNumber lines={[scenario.demandWorking?.revenueFormula, "Revenue = scenario price x estimated demand."]}>
+                        {formatCurrency(scenario.expectedRevenue, currency)}
+                      </ExplainableNumber>
+                    </p>
                   </div>
                   <div className="rounded-md bg-slate-50 p-3">
                     <p className="text-xs uppercase text-slate-500">Profit</p>
-                    <p className="mt-1 text-lg font-semibold">{formatCurrency(scenario.expectedProfit, currency)}</p>
+                    <p className="mt-1 text-lg font-semibold">
+                      <ExplainableNumber lines={[scenario.demandWorking?.profitFormula, "Profit = (scenario price - cost) x estimated demand."]}>
+                        {formatCurrency(scenario.expectedProfit, currency)}
+                      </ExplainableNumber>
+                    </p>
+                    {scenario.profitUsesEstimatedCost && <div className="mt-2"><TrustBadge label="Profit uses estimated cost" /></div>}
                   </div>
                 </div>
                 <p className="mt-3 text-sm text-slate-600">{scenario.modelBased ? "Model-based estimate" : "Business summary estimate only"}</p>
                 {scenario.warnings?.[0] && <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">{scenario.warnings[0]}</p>}
+                <div className="mt-3">
+                  <CalculationWorkingPanel
+                    title="Show working"
+                    summary={scenario.demandWorking?.plainEnglish}
+                    items={[
+                      { label: "Model", value: scenario.demandWorking?.modelType || (scenario.modelBased ? "Pricing model" : "Summary only") },
+                      {
+                        label: "Starting demand",
+                        value: (
+                          <ExplainableNumber lines={[
+                            scenario.demandWorking?.baselineFormula,
+                            scenario.demandWorking?.baselineExplanation
+                          ]}>
+                            {scenario.demandWorking?.baselineDemand ?? "Not shown"} units
+                          </ExplainableNumber>
+                        )
+                      },
+                      { label: "Final demand", value: `${scenario.demandWorking?.finalDemand ?? scenario.expectedDemand} units` }
+                    ]}
+                    formulas={[
+                      scenario.demandWorking?.baselineFormula ? `Baseline: ${scenario.demandWorking.baselineFormula}` : null,
+                      ...workingFormulaLines(scenario.demandWorking)
+                    ]}
+                    evidence={workingEvidenceLines(scenario)}
+                  />
+                </div>
               </article>
             ))}
           </div>
@@ -496,19 +681,49 @@ export function RecommendationPanel({
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs uppercase text-slate-500">Recommended price</p>
-              <p className="mt-1 text-xl font-semibold">{formatCurrency(recommendationResult.recommendedPrice, currency)}</p>
+              <p className="mt-1 text-xl font-semibold">
+                <ExplainableNumber lines={[
+                  `Selected from ${recommendationResult.testedPriceCount || recommendationResult.testedPrices?.length || 0} tested prices.`,
+                  `Objective: ${recommendationResult.objective || "profit"}.`,
+                  recommendationResult.optimizationMethod ? `Optimizer: ${recommendationResult.optimizationMethod.replace("_", " ")}.` : null
+                ]}>
+                  {formatCurrency(recommendationResult.recommendedPrice, currency)}
+                </ExplainableNumber>
+              </p>
             </div>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs uppercase text-slate-500">Expected revenue</p>
-              <p className="mt-1 text-xl font-semibold">{formatCurrency(recommendationResult.expectedRevenue, currency)}</p>
+              <p className="text-xs uppercase text-slate-500">Estimated revenue</p>
+              <p className="mt-1 text-xl font-semibold">
+                <ExplainableNumber lines={[
+                  `${recommendationResult.recommendedPrice} x ${recommendationResult.expectedDemand} = ${recommendationResult.expectedRevenue}`,
+                  "Revenue = recommended price x estimated demand."
+                ]}>
+                  {formatCurrency(recommendationResult.expectedRevenue, currency)}
+                </ExplainableNumber>
+              </p>
             </div>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs uppercase text-slate-500">Expected profit</p>
-              <p className="mt-1 text-xl font-semibold">{formatCurrency(recommendationResult.expectedProfit, currency)}</p>
+              <p className="text-xs uppercase text-slate-500">Estimated profit</p>
+              <p className="mt-1 text-xl font-semibold">
+                <ExplainableNumber lines={[
+                  "Profit = (recommended price - product cost) x estimated demand.",
+                  recommendationResult.profitUsesEstimatedCost ? "Warning: profit uses estimated cost." : null
+                ]}>
+                  {formatCurrency(recommendationResult.expectedProfit, currency)}
+                </ExplainableNumber>
+              </p>
+              {recommendationResult.profitUsesEstimatedCost && <div className="mt-2"><TrustBadge label="Profit uses estimated cost" /></div>}
             </div>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs uppercase text-slate-500">Expected change</p>
-              <p className="mt-1 text-xl font-semibold">{formatPercent(recommendationResult.improvementPercent)}</p>
+              <p className="text-xs uppercase text-slate-500">Estimated improvement</p>
+              <p className="mt-1 text-xl font-semibold">
+                <ExplainableNumber lines={[
+                  "Improvement compares the selected objective at recommended price against the baseline/current price.",
+                  recommendationResult.estimatedImprovementRange ? "Range is derived from prediction uncertainty." : "Single value shown because no prediction range was available."
+                ]}>
+                  {formatImprovementRange(recommendationResult.estimatedImprovementRange, recommendationResult.improvementPercent)}
+                </ExplainableNumber>
+              </p>
             </div>
           </div>
 
@@ -522,7 +737,7 @@ export function RecommendationPanel({
               {recommendationResult.optimizationMethod && <p className="mt-2 text-sm font-medium text-slate-700">Optimizer used: {recommendationResult.optimizationMethod.replace("_", " ")}</p>}
             </div>
             <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <p className="text-sm font-medium text-slate-900">Trust level</p>
+              <p className="text-sm font-medium text-slate-900">What evidence supports this?</p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <span className={`rounded-md px-2 py-1 text-sm font-semibold ${getReliabilityStyles(recommendationResult.decisionLabel)}`}>
                   {recommendationResult.decisionLabel || "Use with caution"}
@@ -534,6 +749,11 @@ export function RecommendationPanel({
                 {recommendationResult.dataFitnessLabel && <span className="rounded-md bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-700">{recommendationResult.dataFitnessLabel}</span>}
               </div>
               {recommendationResult.resultReliability?.reasons?.length > 0 && <p className="mt-2 text-sm text-slate-600">{recommendationResult.resultReliability.reasons[0]}</p>}
+              {recommendationResult.evidenceSummary && (
+                <p className="mt-2 text-sm text-slate-600">
+                  Evidence: {recommendationResult.evidenceSummary.groupedDemandPoints} grouped points, {recommendationResult.evidenceSummary.distinctPrices} price levels, {recommendationResult.evidenceSummary.backtest}.
+                </p>
+              )}
               {recommendationResult.modelErrorSummary?.available && <p className="mt-2 text-sm text-slate-600">Backtest worst error: {Number(recommendationResult.modelErrorSummary.worstErrorPercent || 0).toFixed(1)}%</p>}
             </div>
           </div>
@@ -609,8 +829,8 @@ export function RecommendationPanel({
           </div>
 
           {recommendationResult.calculationSteps?.length > 0 && (
-            <details className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600">
-              <summary className="cursor-pointer font-medium text-slate-800">How this was calculated</summary>
+            <details className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600" open>
+              <summary className="cursor-pointer font-medium text-slate-800">Show working</summary>
               <div className="mt-3 grid gap-1">
                 {recommendationResult.calculationSteps.map((step) => <p key={step}>{step}</p>)}
               </div>

@@ -903,6 +903,7 @@ export function AuthenticatedApp({ session, onLogout }) {
               label: "Pricing Insights",
               content: (
                 <PricingInsightsPanel
+                  currency={currency}
                   products={products}
                   segmentOptions={segmentOptions}
                   readiness={readiness}
@@ -1165,6 +1166,7 @@ export function AuthenticatedApp({ session, onLogout }) {
     if (activePanel === "insights") {
       return (
         <PricingInsightsPanel
+          currency={currency}
           products={products}
           segmentOptions={segmentOptions}
           readiness={readiness}
