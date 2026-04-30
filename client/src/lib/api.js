@@ -4,9 +4,22 @@ const SESSION_KEY = "dp_di_session";
 
 let authToken = "";
 
+function notifySessionExpired(message = "Your session expired. Please log in again.") {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("dp-di-session-expired", { detail: { message } }));
+  }
+}
+
 export function getStoredSession() {
   try {
     const session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+
+    if (session?.expiresAt && Date.now() >= Number(session.expiresAt)) {
+      setStoredSession(null);
+      notifySessionExpired();
+      return null;
+    }
+
     authToken = session?.token || "";
     return session;
   } catch {
@@ -25,11 +38,39 @@ export function setStoredSession(session) {
 }
 
 function apiHeaders(extraHeaders = {}) {
+  getStoredSession();
+
   return {
     ...extraHeaders,
     ...(API_KEY ? { "x-api-key": API_KEY } : {}),
     ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
   };
+}
+
+async function readPayload(response) {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+
+  return null;
+}
+
+async function assertOk(response, fallbackMessage) {
+  if (response.ok) return readPayload(response);
+
+  const payload = await readPayload(response);
+  const message = payload?.error?.message || fallbackMessage || `Request failed with status ${response.status}`;
+
+  if (response.status === 401) {
+    setStoredSession(null);
+    notifySessionExpired(message);
+  }
+
+  const error = new Error(response.status === 403 ? `Permission denied: ${message}` : message);
+  error.status = response.status;
+  throw error;
 }
 
 export async function login({ role, password }) {
@@ -48,10 +89,25 @@ export async function login({ role, password }) {
 
   const session = {
     token: payload.data.token,
-    user: payload.data.user
+    user: payload.data.user,
+    expiresAt: payload.data.expiresAt
   };
   setStoredSession(session);
 
+  return session;
+}
+
+export async function validateSession() {
+  const response = await fetch(`${API_BASE_URL}/auth/me`, {
+    headers: apiHeaders()
+  });
+  const payload = await assertOk(response, `Session check failed with status ${response.status}`);
+  const session = {
+    token: payload.data.token,
+    user: payload.data.user,
+    expiresAt: payload.data.expiresAt
+  };
+  setStoredSession(session);
   return session;
 }
 
@@ -66,13 +122,11 @@ export async function getHealthStatus() {
 }
 
 export async function getProducts() {
-  const response = await fetch(`${API_BASE_URL}/products`);
+  const response = await fetch(`${API_BASE_URL}/products`, {
+    headers: apiHeaders()
+  });
 
-  if (!response.ok) {
-    throw new Error(`Products request failed with status ${response.status}`);
-  }
-
-  return response.json();
+  return assertOk(response, `Products request failed with status ${response.status}`);
 }
 
 export async function uploadSalesCsv(file) {
@@ -87,7 +141,13 @@ export async function uploadSalesCsv(file) {
   const payload = await response.json();
 
   if (!response.ok) {
-    throw new Error(payload?.error?.message || `Upload failed with status ${response.status}`);
+    if (response.status === 401) {
+      setStoredSession(null);
+      notifySessionExpired(payload?.error?.message);
+    }
+    const error = new Error(payload?.error?.message || `Upload failed with status ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
 
   return payload;
@@ -149,11 +209,7 @@ export async function getRecommendations() {
     headers: apiHeaders()
   });
 
-  if (!response.ok) {
-    throw new Error(`Recommendation history failed with status ${response.status}`);
-  }
-
-  return response.json();
+  return assertOk(response, `Recommendation history failed with status ${response.status}`);
 }
 
 export async function applyRecommendation({ recommendationId, appliedPrice, startDate, endDate, expectedTarget }) {
@@ -186,13 +242,11 @@ export async function getRecommendationPerformance() {
 }
 
 export async function getProductDuplicates() {
-  const response = await fetch(`${API_BASE_URL}/products/duplicates`);
+  const response = await fetch(`${API_BASE_URL}/products/duplicates`, {
+    headers: apiHeaders()
+  });
 
-  if (!response.ok) {
-    throw new Error(`Product duplicate request failed with status ${response.status}`);
-  }
-
-  return response.json();
+  return assertOk(response, `Product duplicate request failed with status ${response.status}`);
 }
 
 export async function mergeProducts({ masterProductId, duplicateProductId }) {
@@ -217,11 +271,7 @@ export async function getDashboardSummary() {
     headers: apiHeaders()
   });
 
-  if (!response.ok) {
-    throw new Error(`Dashboard request failed with status ${response.status}`);
-  }
-
-  return response.json();
+  return assertOk(response, `Dashboard request failed with status ${response.status}`);
 }
 
 export async function getInsightReadiness() {
@@ -229,11 +279,7 @@ export async function getInsightReadiness() {
     headers: apiHeaders()
   });
 
-  if (!response.ok) {
-    throw new Error(`Insight readiness request failed with status ${response.status}`);
-  }
-
-  return response.json();
+  return assertOk(response, `Insight readiness request failed with status ${response.status}`);
 }
 
 export async function getDataQualitySummary() {
@@ -241,11 +287,7 @@ export async function getDataQualitySummary() {
     headers: apiHeaders()
   });
 
-  if (!response.ok) {
-    throw new Error(`Data quality request failed with status ${response.status}`);
-  }
-
-  return response.json();
+  return assertOk(response, `Data quality request failed with status ${response.status}`);
 }
 
 export async function setActiveImportBatch(importBatchId) {
@@ -381,11 +423,17 @@ export async function getWorkspaceSettings() {
     headers: apiHeaders()
   });
 
-  if (!response.ok) {
-    throw new Error(`Settings request failed with status ${response.status}`);
-  }
+  return assertOk(response, `Settings request failed with status ${response.status}`);
+}
 
-  return response.json();
+export async function getAuditLogs(limit = 100) {
+  const url = new URL(`${API_BASE_URL}/audit-logs`);
+  url.searchParams.set("limit", String(limit));
+  const response = await fetch(url, {
+    headers: apiHeaders()
+  });
+
+  return assertOk(response, `Audit trail request failed with status ${response.status}`);
 }
 
 export async function updateWorkspaceSettings(settings) {

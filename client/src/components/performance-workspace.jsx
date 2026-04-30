@@ -70,7 +70,10 @@ export function DashboardPanel({ dashboardData, dashboardState, dashboardMessage
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3 text-slate-700">
             <LineChart size={20} />
-            <h2 className="text-base font-semibold">Business Performance</h2>
+            <div>
+              <h2 className="text-base font-semibold">Business Performance</h2>
+              <p className="mt-1 text-sm text-slate-500">A deeper visual read of revenue movement, top products, customer groups, and category contribution.</p>
+            </div>
           </div>
           <button className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700" onClick={refreshDashboard} type="button">
             Refresh
@@ -118,14 +121,14 @@ export function DashboardPanel({ dashboardData, dashboardState, dashboardMessage
         </section>
 
         <section className="max-h-[460px] min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
-          <h3 className="text-base font-semibold">Categories</h3>
+          <h3 className="text-base font-semibold">Category Performance</h3>
           <div className="mt-4">
             <HorizontalBars items={categories} labelKey="category" valueKey="revenue" valueFormatter={(value) => formatCurrency(value, currency)} emptyText="No category data available yet." />
           </div>
         </section>
 
         <section className="max-h-[460px] min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
-          <h3 className="text-base font-semibold">Revenue by Month</h3>
+          <h3 className="text-base font-semibold">Revenue Movement</h3>
           <div className="mt-4">
             <HorizontalBars items={trend} labelKey="month" valueKey="revenue" valueFormatter={(value) => formatCurrency(value, currency)} emptyText="No monthly trend available yet." />
           </div>

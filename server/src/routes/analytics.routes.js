@@ -12,6 +12,8 @@ import {
 } from "../services/dashboard.service.js";
 import { listImportBatches, setActiveImportBatch } from "../services/import-batch.service.js";
 import { simulatePrice } from "../services/simulation.service.js";
+import { logAudit } from "../services/audit.service.js";
+import { requireAuth } from "../middleware/auth.middleware.js";
 
 export const analyticsRouter = Router();
 
@@ -65,9 +67,16 @@ analyticsRouter.get("/import-batches", async (req, res, next) => {
   }
 });
 
-analyticsRouter.put("/active-import-batch", async (req, res, next) => {
+analyticsRouter.put("/active-import-batch", requireAuth(["admin", "analyst"]), async (req, res, next) => {
   try {
     const settings = await setActiveImportBatch(req.body?.importBatchId || null);
+    await logAudit(req, {
+      action: "import_batch.active_changed",
+      targetType: "ImportBatch",
+      targetId: settings.activeImportBatchId,
+      summary: settings.activeImportBatchId ? "Active import batch selected" : "Active import batch cleared",
+      metadata: { activeImportBatchId: settings.activeImportBatchId || null }
+    });
 
     res.json({
       success: true,
@@ -161,7 +170,7 @@ analyticsRouter.get("/recommendation-performance", async (req, res, next) => {
   }
 });
 
-analyticsRouter.post("/scenario-planner", async (req, res, next) => {
+analyticsRouter.post("/scenario-planner", requireAuth(["admin", "analyst"]), async (req, res, next) => {
   try {
     const { productId, segment = "all", prices = [], competitorPrice } = req.body || {};
     const parsedPrices = prices

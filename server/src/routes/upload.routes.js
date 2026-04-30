@@ -10,8 +10,10 @@ import { ImportBatch } from "../models/import-batch.model.js";
 import { ImportRowIssue } from "../models/import-row-issue.model.js";
 import { Product } from "../models/product.model.js";
 import { SalesData } from "../models/sales-data.model.js";
+import { logAudit } from "../services/audit.service.js";
 import { setLatestImportBatchActive } from "../services/import-batch.service.js";
 import { normalizeSegmentValue } from "../utils/segments.js";
+import { getWorkspaceId, workspaceFilter } from "../utils/workspace.js";
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -475,6 +477,7 @@ async function resolveProduct({ productId, sku, productName, category, fallbackP
   }
 
   const createdProduct = await Product.create({
+    workspaceId: productIndexes.workspaceId,
     name: productLabel,
     sku: createSku(identitySku || productLabel),
     category: String(category || productLabel).trim(),
@@ -543,14 +546,16 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
     }
 
     const mapping = buildColumnMapping(headers);
-    const products = await Product.find().lean();
+    const products = await Product.find(workspaceFilter(req)).lean();
     const productIndexes = buildProductIndexes(products);
+    productIndexes.workspaceId = getWorkspaceId(req);
     const records = [];
     const errors = [];
     const rowIssues = [];
     const conflicts = {};
     const source = req.file.originalname;
     const importBatch = await ImportBatch.create({
+      workspaceId: getWorkspaceId(req),
       source,
       detectedColumns: mapping.detectedColumns,
       mappedFields: mapping.mappedFields,
@@ -562,6 +567,7 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
       truncated
     });
     const existingSourceRows = await SalesData.find({
+      workspaceId: getWorkspaceId(req),
       "importMeta.source": source,
       "importMeta.rowNumber": { $gte: 2, $lte: rowsToProcess.length + 1 }
     })
@@ -736,6 +742,7 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
         segmentCounts[customerSegment.label] = (segmentCounts[customerSegment.label] || 0) + 1;
 
         records.push({
+          workspaceId: getWorkspaceId(req),
           productId,
           price,
           quantity: quantityField.parsed,
@@ -775,6 +782,7 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
           reason: error.message.replace(`Row ${rowNumber}: `, "")
         });
         rowIssues.push({
+          workspaceId: getWorkspaceId(req),
           importBatchId: importBatch._id,
           source,
           rowNumber,
@@ -785,7 +793,7 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
     }
 
     const existingFingerprints = records.length
-      ? await SalesData.find({ rowFingerprint: { $in: records.map((record) => record.rowFingerprint) } })
+      ? await SalesData.find(workspaceFilter(req, { rowFingerprint: { $in: records.map((record) => record.rowFingerprint) } }))
         .select("rowFingerprint")
         .lean()
       : [];
@@ -954,6 +962,17 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
       await SalesData.insertMany(uniqueRecords.slice(index, index + INSERT_BATCH_SIZE), { ordered: false });
     }
     await setLatestImportBatchActive(importBatch._id);
+    await logAudit(req, {
+      action: "upload.sales_csv",
+      targetType: "ImportBatch",
+      targetId: importBatch._id,
+      summary: `Uploaded sales CSV ${source}`,
+      metadata: {
+        importedRows: uniqueRecords.length,
+        skippedRows: errors.length + duplicateRowsSkipped,
+        truncated
+      }
+    });
 
     res.status(201).json({
       success: true,

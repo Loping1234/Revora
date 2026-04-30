@@ -1,7 +1,14 @@
 import mongoose from "mongoose";
+import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 
 const demandModelSchema = new mongoose.Schema(
   {
+    workspaceId: {
+      type: String,
+      required: true,
+      default: DEFAULT_WORKSPACE_ID,
+      index: true
+    },
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
@@ -262,5 +269,7 @@ const demandModelSchema = new mongoose.Schema(
 );
 
 demandModelSchema.index({ productId: 1, segment: 1 }, { unique: true });
+demandModelSchema.index({ workspaceId: 1, productId: 1, segment: 1 });
+demandModelSchema.index({ workspaceId: 1, activeImportBatchId: 1 });
 
 export const DemandModel = mongoose.model("DemandModel", demandModelSchema);

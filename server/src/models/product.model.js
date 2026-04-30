@@ -1,7 +1,14 @@
 import mongoose from "mongoose";
+import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 
 const productSchema = new mongoose.Schema(
   {
+    workspaceId: {
+      type: String,
+      required: true,
+      default: DEFAULT_WORKSPACE_ID,
+      index: true
+    },
     name: {
       type: String,
       required: true,
@@ -71,6 +78,10 @@ const productSchema = new mongoose.Schema(
 function normalizeProductKey(value) {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
+
+productSchema.index({ workspaceId: 1, normalizedSku: 1 });
+productSchema.index({ workspaceId: 1, normalizedName: 1 });
+productSchema.index({ workspaceId: 1, category: 1, name: 1 });
 
 productSchema.pre("save", function normalizeIdentity(next) {
   this.normalizedSku = normalizeProductKey(this.sku);

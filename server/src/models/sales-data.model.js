@@ -1,7 +1,14 @@
 import mongoose from "mongoose";
+import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 
 const salesDataSchema = new mongoose.Schema(
   {
+    workspaceId: {
+      type: String,
+      required: true,
+      default: DEFAULT_WORKSPACE_ID,
+      index: true
+    },
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
@@ -126,5 +133,9 @@ const salesDataSchema = new mongoose.Schema(
 salesDataSchema.index({ productId: 1, date: 1, customerSegment: 1, price: 1 });
 salesDataSchema.index({ productId: 1, customerSegment: 1, stockoutFlag: 1, inventory: 1 });
 salesDataSchema.index({ "importMeta.source": 1, "importMeta.rowNumber": 1 });
+salesDataSchema.index({ workspaceId: 1, productId: 1, date: 1, customerSegment: 1, price: 1 });
+salesDataSchema.index({ workspaceId: 1, importBatchId: 1 });
+salesDataSchema.index({ workspaceId: 1, date: 1 });
+salesDataSchema.index({ workspaceId: 1, customerSegment: 1 });
 
 export const SalesData = mongoose.model("SalesData", salesDataSchema);

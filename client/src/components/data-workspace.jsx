@@ -47,6 +47,7 @@ import {
 import {
   HorizontalBars,
   MiniRevenueTrend,
+  SectionHeader,
   SummaryCard,
   WarningPanel
 } from "./common";
@@ -61,9 +62,24 @@ export function SalesDataPanel({ handleUpload, handleDownloadPanelReport, select
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="shrink-0 flex items-center gap-3 text-slate-700">
-        <Upload size={20} />
-        <h2 className="text-base font-semibold">Import Sales History</h2>
+      <SectionHeader
+        icon={Upload}
+        title="Import Sales History"
+        description="Upload a business CSV, confirm how columns were understood, and keep the current dataset visible for demo confidence."
+      />
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_360px]">
+        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4">
+          <p className="text-sm font-semibold text-slate-900">Expected CSV contents</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Include product identity, selling price or revenue, quantity sold, and preferably date, cost, category, customer group, inventory, and competitor price.
+          </p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <p className="text-xs font-medium uppercase text-slate-500">Current dataset</p>
+          <p className="mt-1 text-lg font-semibold text-slate-950">{totalSalesRecords} sales rows</p>
+          <p className="mt-1 text-sm text-slate-500">{uploadSummary?.latestImportSource || selectedFile?.name || "No file selected in this session"}</p>
+        </div>
       </div>
 
       <form className="mt-4 shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center" onSubmit={handleUpload}>

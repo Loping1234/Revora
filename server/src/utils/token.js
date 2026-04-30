@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import { env } from "../config/env.js";
 
+export const SESSION_TTL_SECONDS = 60 * 60 * 8;
+
 function base64UrlEncode(value) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
@@ -14,11 +16,13 @@ function sign(value) {
 }
 
 export function createSessionToken(payload) {
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + SESSION_TTL_SECONDS;
   const header = base64UrlEncode({ alg: "HS256", typ: "JWT" });
   const body = base64UrlEncode({
     ...payload,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8
+    iat: now,
+    exp
   });
   const unsigned = `${header}.${body}`;
 

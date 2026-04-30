@@ -5,6 +5,8 @@ import { ImportRowIssue } from "../models/import-row-issue.model.js";
 import { Product } from "../models/product.model.js";
 import { SalesData } from "../models/sales-data.model.js";
 import { setLatestImportBatchActive } from "../services/import-batch.service.js";
+import { logAudit } from "../services/audit.service.js";
+import { getWorkspaceId, workspaceFilter } from "../utils/workspace.js";
 
 export const ingestRouter = Router();
 
@@ -92,17 +94,18 @@ function buildFingerprint({ source, identity, date, price, quantity, segment }) 
   return crypto.createHash("sha256").update(parts.join("|")).digest("hex");
 }
 
-async function resolveApiProduct({ sku, externalProductId, productName, category, price, cost, inventory }) {
+async function resolveApiProduct({ workspaceId, sku, externalProductId, productName, category, price, cost, inventory }) {
   const identity = sku || (externalProductId ? `PID-${externalProductId}` : undefined);
-  let product = identity ? await Product.findOne({ sku: identity }).lean() : null;
+  let product = identity ? await Product.findOne({ workspaceId, sku: identity }).lean() : null;
 
   if (!product && productName) {
-    product = await Product.findOne({ sku: `AUTO-${normalizeProductKey(productName)}` }).lean();
+    product = await Product.findOne({ workspaceId, sku: `AUTO-${normalizeProductKey(productName)}` }).lean();
   }
 
   if (product) return product;
 
   return Product.create({
+    workspaceId,
     sku: identity || `AUTO-${normalizeProductKey(productName || category || "product")}-${Date.now()}`,
     name: productName || (externalProductId ? `Product ${externalProductId}` : category || "Imported Product"),
     category: category || "Uncategorized",
@@ -117,6 +120,7 @@ ingestRouter.post("/sales", async (req, res, next) => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
     const source = String(req.body?.source || "api-ingest").trim() || "api-ingest";
+    const workspaceId = getWorkspaceId(req);
 
     if (!rows.length) {
       return res.status(400).json({
@@ -134,6 +138,7 @@ ingestRouter.post("/sales", async (req, res, next) => {
     let belowCostRowsDetected = 0;
     let stockoutRowsDetected = 0;
     const importBatch = await ImportBatch.create({
+      workspaceId,
       source,
       status: "processing",
       detectedColumns: rows[0] ? Object.keys(rows[0]) : [],
@@ -185,7 +190,7 @@ ingestRouter.post("/sales", async (req, res, next) => {
         if (Number.isFinite(cost)) costRowsDetected += 1;
         if (Number.isFinite(cost) && price < cost) belowCostRowsDetected += 1;
         if (isStockout) stockoutRowsDetected += 1;
-        const product = await resolveApiProduct({ sku, externalProductId, productName, category, price, cost, inventory });
+        const product = await resolveApiProduct({ workspaceId, sku, externalProductId, productName, category, price, cost, inventory });
         const identity = sku || externalProductId || productName || category || product.sku;
         const rowFingerprint = buildFingerprint({ source, identity, date, price, quantity, segment: segment.key });
 
@@ -194,6 +199,7 @@ ingestRouter.post("/sales", async (req, res, next) => {
         productsDetected.add(String(product._id));
 
         records.push({
+          workspaceId,
           productId: product._id,
           price,
           quantity,
@@ -230,6 +236,7 @@ ingestRouter.post("/sales", async (req, res, next) => {
       } catch (error) {
         errors.push({ row: rowNumber, reason: error.message });
         rowIssues.push({
+          workspaceId,
           importBatchId: importBatch._id,
           source,
           rowNumber,
@@ -240,7 +247,7 @@ ingestRouter.post("/sales", async (req, res, next) => {
     }
 
     const existing = records.length
-      ? await SalesData.find({ rowFingerprint: { $in: records.map((record) => record.rowFingerprint) } }).select("rowFingerprint").lean()
+      ? await SalesData.find(workspaceFilter(req, { rowFingerprint: { $in: records.map((record) => record.rowFingerprint) } })).select("rowFingerprint").lean()
       : [];
     const existingFingerprints = new Set(existing.map((record) => record.rowFingerprint));
     const uniqueRecords = records.filter((record) => !existingFingerprints.has(record.rowFingerprint));
@@ -291,6 +298,18 @@ ingestRouter.post("/sales", async (req, res, next) => {
         ...(stockoutRowsDetected ? [`${stockoutRowsDetected} stockout rows detected.`] : [])
       ],
       completedAt: new Date()
+    });
+    await logAudit(req, {
+      action: "ingest.sales_json",
+      targetType: "ImportBatch",
+      targetId: importBatch._id,
+      summary: `API ingest processed ${rows.length} rows and imported ${uniqueRecords.length}.`,
+      metadata: {
+        source,
+        totalRows: rows.length,
+        importedRows: uniqueRecords.length,
+        skippedRows: errors.length + (records.length - uniqueRecords.length)
+      }
     });
 
     res.status(201).json({

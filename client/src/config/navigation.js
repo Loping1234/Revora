@@ -10,14 +10,14 @@ import {
 } from "lucide-react";
 
 export const sidebarItems = [
-  { id: "home", label: "Home", icon: Home, status: "ready" },
-  { id: "dataWorkspace", label: "Data Workspace", icon: Upload, status: "ready" },
-  { id: "productsWorkspace", label: "Products", icon: Package, status: "ready" },
-  { id: "modelsWorkspace", label: "Pricing Models", icon: TrendingUp, status: "ready" },
-  { id: "decisionsWorkspace", label: "Price Decisions", icon: Target, status: "ready" },
-  { id: "performanceWorkspace", label: "Performance", icon: LineChart, status: "ready" },
-  { id: "exports", label: "Reports & Export", icon: FileDown, status: "ready" },
-  { id: "settings", label: "Settings", icon: Settings, status: "ready" }
+  { id: "home", label: "Home", description: "Executive snapshot of revenue, readiness, and next actions.", icon: Home, status: "ready" },
+  { id: "dataWorkspace", label: "Sales Data", description: "Upload CSV files, review data quality, and control the active dataset.", icon: Upload, status: "ready" },
+  { id: "productsWorkspace", label: "Products", description: "Manage product readiness, pricing context, customer groups, and market signals.", icon: Package, status: "ready" },
+  { id: "modelsWorkspace", label: "Pricing Insights", description: "Create trusted price-response insights from model-ready product groups.", icon: TrendingUp, status: "ready" },
+  { id: "decisionsWorkspace", label: "Price Decisions", description: "Simulate prices, compare scenarios, and generate guarded recommendations.", icon: Target, status: "ready" },
+  { id: "performanceWorkspace", label: "Performance Dashboard", description: "Track revenue movement, segment performance, and recommendation outcomes.", icon: LineChart, status: "ready" },
+  { id: "exports", label: "Reports & Export", description: "Download examiner-ready reports with assumptions, formulas, and limitations.", icon: FileDown, status: "ready" },
+  { id: "settings", label: "Settings", description: "Configure branding, currency, report defaults, access, and demo controls.", icon: Settings, status: "ready" }
 ];
 
 export const objectiveOptions = [

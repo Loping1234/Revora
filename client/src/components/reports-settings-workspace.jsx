@@ -63,6 +63,13 @@ export function ReportsExportPanel({ recommendations, exportState, exportMessage
     { type: "recommendationHistory", title: "Recommendation History Report", note: "Saved recommendation history in a polished workbook.", filename: "pricing-recommendation-history-report.xlsx" },
     { type: "examinerWorkbook", title: "All-in-One Examiner Report", note: "One workbook covering data quality, products, insights, dashboard, recommendations, and limitations.", filename: "pricing-examiner-workbook.xlsx" }
   ];
+  const demoChecklist = [
+    "Dataset summary and active source",
+    "Revenue, profit, and product readiness",
+    "Formulas and model quality warnings",
+    "Recommendation result and tested prices",
+    "Known limitations and next data needed"
+  ];
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -80,10 +87,24 @@ export function ReportsExportPanel({ recommendations, exportState, exportMessage
         </div>
         <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
           <p className="text-xs uppercase text-slate-500">Report format</p>
-          <p className="mt-2 text-xl font-semibold">CSV</p>
-          <p className="mt-2 text-sm text-slate-500">Works with Excel, Google Sheets, and BI tools.</p>
+          <p className="mt-2 text-xl font-semibold">XLSX + CSV</p>
+          <p className="mt-2 text-sm text-slate-500">Polished workbooks for demo, plus CSV for recommendation data.</p>
         </div>
       </div>
+
+      <section className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <div className="flex items-center gap-3 text-slate-700">
+          <CheckCircle2 size={18} />
+          <h3 className="text-sm font-semibold text-slate-950">Demo Report Checklist</h3>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+          {demoChecklist.map((item) => (
+            <div key={item} className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">
+              {item}
+            </div>
+          ))}
+        </div>
+      </section>
 
       <div className="mt-5 grid gap-3 lg:grid-cols-2">
         {reportCards.map((report) => (
@@ -126,6 +147,11 @@ export function SettingsPanel({ settingsForm, setSettingsForm, settingsState, se
       />
 
       <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={handleSaveSettings}>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 lg:col-span-2">
+          <p className="text-sm font-semibold text-slate-900">Branding</p>
+          <p className="mt-1 text-sm text-slate-500">Controls how the workspace appears during the examiner demo.</p>
+        </div>
+
         <FormRow label="Company name">
           <input
             className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-700"
@@ -177,6 +203,11 @@ export function SettingsPanel({ settingsForm, setSettingsForm, settingsState, se
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 lg:col-span-2">
+          <p className="text-sm font-semibold text-slate-900">Pricing Defaults</p>
+          <p className="mt-1 text-sm text-slate-500">Sets the default currency, objective, and exported report title.</p>
         </div>
 
         <label className="grid gap-2 text-sm font-medium text-slate-700">

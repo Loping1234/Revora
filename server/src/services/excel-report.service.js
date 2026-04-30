@@ -7,6 +7,7 @@ import { Recommendation } from "../models/recommendation.model.js";
 import { SalesData } from "../models/sales-data.model.js";
 import { assessReadinessSummary, getDashboardSummary } from "./dashboard.service.js";
 import { getDuplicateEvidence } from "../utils/product-matching.js";
+import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 
 const moneyFormat = '"$"#,##0.00;[Red]-"$"#,##0.00';
 const numberFormat = '#,##0.00';
@@ -136,8 +137,10 @@ export function sendWorkbook(res, workbook, filename) {
 }
 
 async function getEnrichedProducts() {
-  const products = await Product.find().sort({ name: 1 }).lean();
+  const workspaceMatch = { workspaceId: DEFAULT_WORKSPACE_ID };
+  const products = await Product.find(workspaceMatch).sort({ name: 1 }).lean();
   const salesCounts = await SalesData.aggregate([
+    { $match: workspaceMatch },
     {
       $group: {
         _id: "$productId",
@@ -153,7 +156,10 @@ async function getEnrichedProducts() {
       }
     }
   ]);
-  const modelCounts = await DemandModel.aggregate([{ $group: { _id: "$productId", fittedModels: { $sum: 1 } } }]);
+  const modelCounts = await DemandModel.aggregate([
+    { $match: workspaceMatch },
+    { $group: { _id: "$productId", fittedModels: { $sum: 1 } } }
+  ]);
   const salesMap = new Map(salesCounts.map((item) => [String(item._id), item]));
   const modelMap = new Map(modelCounts.map((item) => [String(item._id), item.fittedModels]));
 
@@ -267,10 +273,10 @@ export async function buildProductsWorkbook() {
 }
 
 export async function buildSalesDataWorkbook(source) {
-  const query = source ? { "importMeta.source": source } : {};
+  const query = source ? { workspaceId: DEFAULT_WORKSPACE_ID, "importMeta.source": source } : { workspaceId: DEFAULT_WORKSPACE_ID };
   const [rows, batch] = await Promise.all([
     SalesData.find(query).sort({ createdAt: -1 }).limit(5000).lean(),
-    source ? ImportBatch.findOne({ source }).sort({ createdAt: -1 }).lean() : null
+    source ? ImportBatch.findOne({ workspaceId: DEFAULT_WORKSPACE_ID, source }).sort({ createdAt: -1 }).lean() : null
   ]);
   const workbook = createWorkbook("Sales Data Report");
   const summary = workbook.addWorksheet("Summary");
@@ -314,7 +320,7 @@ export async function buildSalesDataWorkbook(source) {
 }
 
 export async function buildPricingInsightsWorkbook() {
-  const models = await DemandModel.find().sort({ updatedAt: -1 }).populate("productId", "name sku category").lean();
+  const models = await DemandModel.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ updatedAt: -1 }).populate("productId", "name sku category").lean();
   const workbook = createWorkbook("Pricing Insights Report");
   const sheet = workbook.addWorksheet("Pricing Insights");
   addTitle(sheet, "Pricing Insights Report", "Fitted demand models with model reliability, formulas, and warnings.");
@@ -354,8 +360,8 @@ export async function buildPricingInsightsWorkbook() {
 }
 
 export async function buildRecommendationsWorkbook(historyOnly = false) {
-  const recommendations = await Recommendation.find().sort({ createdAt: -1 }).limit(500).populate("productId", "name sku category").lean();
-  const outcomes = await RecommendationOutcome.find().sort({ updatedAt: -1 }).limit(500).populate("productId", "name sku category").lean();
+  const recommendations = await Recommendation.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ createdAt: -1 }).limit(500).populate("productId", "name sku category").lean();
+  const outcomes = await RecommendationOutcome.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ updatedAt: -1 }).limit(500).populate("productId", "name sku category").lean();
   const workbook = createWorkbook(historyOnly ? "Recommendation History Report" : "Recommendations Report");
   const sheet = workbook.addWorksheet(historyOnly ? "History" : "Recommendations");
   addTitle(sheet, historyOnly ? "Recommendation History Report" : "Recommendations Report", "Saved pricing recommendations with assumptions and explanations.");
@@ -428,9 +434,9 @@ export async function buildExaminerWorkbook() {
   const workbook = createWorkbook("Examiner Workbook");
   const dashboard = await getDashboardSummary();
   const products = await getEnrichedProducts();
-  const models = await DemandModel.find().sort({ updatedAt: -1 }).populate("productId", "name sku category").lean();
-  const recommendations = await Recommendation.find().sort({ createdAt: -1 }).limit(100).populate("productId", "name sku category").lean();
-  const outcomes = await RecommendationOutcome.find().sort({ updatedAt: -1 }).limit(100).populate("productId", "name sku category").lean();
+  const models = await DemandModel.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ updatedAt: -1 }).populate("productId", "name sku category").lean();
+  const recommendations = await Recommendation.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ createdAt: -1 }).limit(100).populate("productId", "name sku category").lean();
+  const outcomes = await RecommendationOutcome.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ updatedAt: -1 }).limit(100).populate("productId", "name sku category").lean();
   const executive = workbook.addWorksheet("Executive Summary");
   addTitle(executive, "Examiner Workbook", "A polished overview of imported data, models, recommendations, and limitations.");
   addKeyValues(executive, [

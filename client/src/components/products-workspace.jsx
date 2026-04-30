@@ -52,7 +52,7 @@ import {
   WarningPanel
 } from "./common";
 
-export function ProductsTable({ products, productError, currency }) {
+export function ProductsTable({ products, productError, currency, onCreateInsight, onSimulatePrice, onViewReadiness }) {
   const pageSize = 10;
   const [sortConfig, setSortConfig] = useState({ key: "name", direction: "asc" });
   const [currentPage, setCurrentPage] = useState(1);
@@ -203,6 +203,29 @@ export function ProductsTable({ products, productError, currency }) {
                 <td className="py-2 pr-4">
                   <p className="font-medium text-slate-900">{product.name}</p>
                   <p className="text-xs text-slate-500">{product.sku}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <button
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
+                      onClick={() => onViewReadiness?.(product)}
+                      type="button"
+                    >
+                      Data
+                    </button>
+                    <button
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
+                      onClick={() => onCreateInsight?.(product)}
+                      type="button"
+                    >
+                      Insight
+                    </button>
+                    <button
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
+                      onClick={() => onSimulatePrice?.(product)}
+                      type="button"
+                    >
+                      Simulate
+                    </button>
+                  </div>
                 </td>
                 <td className="py-2 pr-4 text-slate-600">{product.category}</td>
                 <td className="py-2 pr-4 text-slate-600">

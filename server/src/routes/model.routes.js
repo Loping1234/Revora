@@ -4,9 +4,11 @@ import { requireAuth } from "../middleware/auth.middleware.js";
 import { requireApiKey } from "../middleware/api-key.middleware.js";
 import { DemandModel } from "../models/demand-model.model.js";
 import { Product } from "../models/product.model.js";
+import { logAudit } from "../services/audit.service.js";
 import { fitDemandModel, getInsightSummary, isSupportedSegment } from "../services/demand-model.service.js";
 import { simulatePrice } from "../services/simulation.service.js";
 import { formatSegmentLabel } from "../utils/segments.js";
+import { workspaceFilter } from "../utils/workspace.js";
 
 export const modelRouter = Router();
 
@@ -28,7 +30,7 @@ modelRouter.post("/fit-model", requireApiKey, requireAuth(["admin", "analyst"]),
       });
     }
 
-    const product = await Product.findById(productId).lean();
+    const product = await Product.findOne(workspaceFilter(req, { _id: productId })).lean();
 
     if (!product) {
       return res.status(404).json({
@@ -39,6 +41,13 @@ modelRouter.post("/fit-model", requireApiKey, requireAuth(["admin", "analyst"]),
 
     const summary = await getInsightSummary({ productId, segment });
     const model = await fitDemandModel({ productId, segment });
+    await logAudit(req, {
+      action: "model.fitted",
+      targetType: "DemandModel",
+      targetId: model._id,
+      summary: `Pricing model fitted for ${product.name}`,
+      metadata: { productId, segment, modelType: model.modelType }
+    });
 
     res.json({
       success: true,
@@ -59,7 +68,7 @@ modelRouter.post("/fit-model", requireApiKey, requireAuth(["admin", "analyst"]),
     });
   } catch (error) {
     if (error.insightSummary && req.body?.productId && mongoose.Types.ObjectId.isValid(req.body.productId)) {
-      const product = await Product.findById(req.body.productId).lean();
+      const product = await Product.findOne(workspaceFilter(req, { _id: req.body.productId })).lean();
       return res.json({
         success: true,
         data: {
@@ -83,7 +92,7 @@ modelRouter.post("/fit-model", requireApiKey, requireAuth(["admin", "analyst"]),
 
 modelRouter.get("/models", requireApiKey, requireAuth(["admin", "analyst"]), async (req, res, next) => {
   try {
-    const query = {};
+    const query = workspaceFilter(req);
 
     if (req.query.productId) {
       if (!mongoose.Types.ObjectId.isValid(req.query.productId)) {
@@ -121,7 +130,7 @@ modelRouter.get("/models/compare", requireApiKey, requireAuth(["admin", "analyst
       });
     }
 
-    const product = await Product.findById(productId).lean();
+    const product = await Product.findOne(workspaceFilter(req, { _id: productId })).lean();
 
     if (!product) {
       return res.status(404).json({
@@ -180,7 +189,22 @@ modelRouter.post("/simulate", requireApiKey, requireAuth(["admin", "analyst"]), 
       });
     }
 
+    const product = await Product.findOne(workspaceFilter(req, { _id: productId })).lean();
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        error: { message: "Product not found", statusCode: 404 }
+      });
+    }
+
     const result = await simulatePrice({ productId, price, competitorPrice, segment });
+    await logAudit(req, {
+      action: "simulation.run",
+      targetType: "Product",
+      targetId: productId,
+      summary: "Price simulation run",
+      metadata: { productId, segment, price, competitorPrice }
+    });
 
     res.json({
       success: true,

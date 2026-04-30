@@ -18,7 +18,6 @@ export const env = {
   auth: {
     adminPassword: process.env.AUTH_ADMIN_PASSWORD || "admin123",
     analystPassword: process.env.AUTH_ANALYST_PASSWORD || "analyst123",
-    adminPasswordHash: process.env.AUTH_ADMIN_PASSWORD_HASH || "",
-    analystPasswordHash: process.env.AUTH_ANALYST_PASSWORD_HASH || ""
+    managerPassword: process.env.AUTH_MANAGER_PASSWORD || "manager123"
   }
 };

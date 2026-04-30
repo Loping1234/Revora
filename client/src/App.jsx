@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getStoredSession, setStoredSession } from "./lib/api";
 import { AuthenticatedApp } from "./components/authenticated-app";
 import { AppErrorBoundary } from "./components/common";
@@ -11,6 +11,15 @@ function App() {
     setStoredSession(null);
     setSession(null);
   }
+
+  useEffect(() => {
+    function handleSessionExpired() {
+      handleLogout();
+    }
+
+    window.addEventListener("dp-di-session-expired", handleSessionExpired);
+    return () => window.removeEventListener("dp-di-session-expired", handleSessionExpired);
+  }, []);
 
   if (!session) {
     return (

@@ -1,5 +1,8 @@
 import { Router } from "express";
+import { requireAuth } from "../middleware/auth.middleware.js";
 import { WorkspaceSettings } from "../models/workspace-settings.model.js";
+import { logAudit } from "../services/audit.service.js";
+import { getWorkspaceId, workspaceFilter } from "../utils/workspace.js";
 
 export const settingsRouter = Router();
 
@@ -12,20 +15,23 @@ const DEFAULT_SETTINGS = {
   reportName: "Pricing Recommendation Report"
 };
 
-async function getSettings() {
-  const existing = await WorkspaceSettings.findOne().lean();
+async function getSettings(req) {
+  const existing = await WorkspaceSettings.findOne(workspaceFilter(req)).lean();
 
   if (existing) {
     return existing;
   }
 
-  const created = await WorkspaceSettings.create(DEFAULT_SETTINGS);
+  const created = await WorkspaceSettings.create({
+    ...DEFAULT_SETTINGS,
+    workspaceId: getWorkspaceId(req)
+  });
   return created.toObject();
 }
 
 settingsRouter.get("/", async (req, res, next) => {
   try {
-    const settings = await getSettings();
+    const settings = await getSettings(req);
 
     res.json({
       success: true,
@@ -36,7 +42,7 @@ settingsRouter.get("/", async (req, res, next) => {
   }
 });
 
-settingsRouter.put("/", async (req, res, next) => {
+settingsRouter.put("/", requireAuth(["admin"]), async (req, res, next) => {
   try {
     const updates = {
       companyName: req.body.companyName || DEFAULT_SETTINGS.companyName,
@@ -61,11 +67,21 @@ settingsRouter.put("/", async (req, res, next) => {
       });
     }
 
-    const settings = await WorkspaceSettings.findOneAndUpdate({}, updates, {
+    const settings = await WorkspaceSettings.findOneAndUpdate(workspaceFilter(req), {
+      ...updates,
+      workspaceId: getWorkspaceId(req)
+    }, {
       new: true,
       upsert: true,
       runValidators: true
     }).lean();
+    await logAudit(req, {
+      action: "settings.updated",
+      targetType: "WorkspaceSettings",
+      targetId: settings?._id,
+      summary: "Workspace settings updated",
+      metadata: updates
+    });
 
     res.json({
       success: true,

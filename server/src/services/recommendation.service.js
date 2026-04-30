@@ -6,6 +6,7 @@ import { fitDemandModel, isSupportedSegment } from "./demand-model.service.js";
 import { getActiveImportBatchId } from "./import-batch.service.js";
 import { calculatePriceOutcome, getConfidenceLabel, getModelWarnings, round } from "./simulation.service.js";
 import { formatSegmentLabel } from "../utils/segments.js";
+import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 import { buildEstimatedImprovementRange, getRecommendationDecision, profitUsesEstimatedCost } from "./trust-policy.service.js";
 
 const MAX_PRICE_POINTS = 101;
@@ -226,7 +227,7 @@ async function getRelatedProductWarnings(product) {
   ];
 }
 
-export async function recommendPrice({ productId, segment = "all", objective = "profit", minPrice, maxPrice, step, competitorPrice }) {
+export async function recommendPrice({ productId, segment = "all", objective = "profit", minPrice, maxPrice, step, competitorPrice, workspaceId = DEFAULT_WORKSPACE_ID }) {
   if (!isSupportedSegment(segment)) {
     throw new Error("segment must be all or an imported customer group");
   }
@@ -439,6 +440,7 @@ export async function recommendPrice({ productId, segment = "all", objective = "
   const usesEstimatedCost = profitUsesEstimatedCost({ costQuality: model.costQuality || { label: costQualityLabel }, product });
 
   const recommendationPayload = {
+    workspaceId,
     productId,
     segment,
     objective: effectiveObjective,

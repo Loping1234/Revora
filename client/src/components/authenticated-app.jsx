@@ -740,6 +740,18 @@ export function AuthenticatedApp({ session, onLogout }) {
   const databaseStatus = health?.database?.status || "unknown";
   const totalSalesRecords = products.reduce((total, product) => total + (product.salesRecords || 0), 0);
   const totalFittedModels = products.reduce((total, product) => total + (product.fittedModels || 0), 0);
+  const activeSource = dashboardData?.sources?.[0];
+  const datasetSummary = activeSource
+    ? {
+        label: activeSource.source || "Imported dataset",
+        detail: `${activeSource.rows || 0} rows in active view`,
+        warning: (dashboardData?.sources || []).length > 1
+      }
+    : {
+        label: "No active dataset",
+        detail: totalSalesRecords ? `${totalSalesRecords} sales rows loaded` : "Upload CSV to begin",
+        warning: false
+      };
   const segmentOptions = useMemo(() => {
     const seen = new Set(["all"]);
     const options = [{ value: "all", label: "All customers" }];
@@ -755,6 +767,23 @@ export function AuthenticatedApp({ session, onLogout }) {
 
     return options;
   }, [dashboardData]);
+
+  function openProductInsight(product) {
+    setSelectedProductId(product._id);
+    setSelectedSegment("all");
+    setActivePanel("modelsWorkspace");
+  }
+
+  function openProductSimulator(product) {
+    setSimulatorProductId(product._id);
+    setSimulatorSegment("all");
+    setSimulatorPrice(product.basePrice ? String(product.basePrice) : "");
+    setActivePanel("decisionsWorkspace");
+  }
+
+  function openProductReadiness() {
+    setActivePanel("dataWorkspace");
+  }
 
   const panelContent = useMemo(() => {
     if (activePanel === "home") {
@@ -836,7 +865,16 @@ export function AuthenticatedApp({ session, onLogout }) {
             {
               id: "products",
               label: "Product Table",
-              content: <ProductsTable currency={currency} products={products} productError={productError} />
+              content: (
+                <ProductsTable
+                  currency={currency}
+                  onCreateInsight={openProductInsight}
+                  onSimulatePrice={openProductSimulator}
+                  onViewReadiness={openProductReadiness}
+                  products={products}
+                  productError={productError}
+                />
+              )
             },
             {
               id: "intelligence",
@@ -1073,7 +1111,16 @@ export function AuthenticatedApp({ session, onLogout }) {
     }
 
     if (activePanel === "products") {
-      return <ProductsTable currency={currency} products={products} productError={productError} />;
+      return (
+        <ProductsTable
+          currency={currency}
+          onCreateInsight={openProductInsight}
+          onSimulatePrice={openProductSimulator}
+          onViewReadiness={openProductReadiness}
+          products={products}
+          productError={productError}
+        />
+      );
     }
 
     if (activePanel === "sales") {
@@ -1397,6 +1444,7 @@ export function AuthenticatedApp({ session, onLogout }) {
       activeItem={{ ...activeItem, id: activePanel }}
       apiBaseUrl={API_BASE_URL}
       databaseStatus={databaseStatus}
+      datasetSummary={datasetSummary}
       error={error}
       health={health}
       isSidebarOpen={isSidebarOpen}

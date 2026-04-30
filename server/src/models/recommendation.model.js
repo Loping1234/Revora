@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 
 const testedPriceSchema = new mongoose.Schema(
   {
@@ -29,6 +30,12 @@ const testedPriceSchema = new mongoose.Schema(
 
 const recommendationSchema = new mongoose.Schema(
   {
+    workspaceId: {
+      type: String,
+      required: true,
+      default: DEFAULT_WORKSPACE_ID,
+      index: true
+    },
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
@@ -329,5 +336,7 @@ const recommendationSchema = new mongoose.Schema(
 );
 
 recommendationSchema.index({ productId: 1, createdAt: -1 });
+recommendationSchema.index({ workspaceId: 1, productId: 1, createdAt: -1 });
+recommendationSchema.index({ workspaceId: 1, status: 1, createdAt: -1 });
 
 export const Recommendation = mongoose.model("Recommendation", recommendationSchema);

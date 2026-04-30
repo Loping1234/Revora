@@ -7,7 +7,9 @@ import { SalesData } from "../models/sales-data.model.js";
 import { requireApiKey } from "../middleware/api-key.middleware.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
 import { assessReadinessSummary } from "../services/dashboard.service.js";
+import { logAudit } from "../services/audit.service.js";
 import { getDuplicateEvidence } from "../utils/product-matching.js";
+import { getWorkspaceId, workspaceFilter } from "../utils/workspace.js";
 
 export const productRouter = Router();
 
@@ -56,8 +58,10 @@ function findDuplicateProducts(products) {
 
 productRouter.get("/", async (req, res, next) => {
   try {
-    const products = await Product.find().sort({ name: 1 }).lean();
+    const filter = workspaceFilter(req);
+    const products = await Product.find(filter).sort({ name: 1 }).lean();
     const salesCounts = await SalesData.aggregate([
+      { $match: filter },
       {
         $group: {
           _id: "$productId",
@@ -72,6 +76,7 @@ productRouter.get("/", async (req, res, next) => {
       }
     ]);
     const modelCounts = await DemandModel.aggregate([
+      { $match: filter },
       { $group: { _id: "$productId", fittedModels: { $sum: 1 } } }
     ]);
     const countMap = new Map(salesCounts.map((item) => [String(item._id), item]));
@@ -101,7 +106,7 @@ productRouter.get("/", async (req, res, next) => {
 
 productRouter.get("/duplicates", async (req, res, next) => {
   try {
-    const products = await Product.find().sort({ category: 1, name: 1 }).lean();
+    const products = await Product.find(workspaceFilter(req)).sort({ category: 1, name: 1 }).lean();
 
     res.json({
       success: true,
@@ -127,8 +132,8 @@ productRouter.post("/merge", requireApiKey, requireAuth(["admin"]), async (req, 
     }
 
     const [master, duplicate] = await Promise.all([
-      Product.findById(masterProductId),
-      Product.findById(duplicateProductId)
+      Product.findOne({ _id: masterProductId, workspaceId: getWorkspaceId(req) }),
+      Product.findOne({ _id: duplicateProductId, workspaceId: getWorkspaceId(req) })
     ]);
 
     if (!master || !duplicate) {
@@ -138,20 +143,27 @@ productRouter.post("/merge", requireApiKey, requireAuth(["admin"]), async (req, 
       });
     }
 
-    await SalesData.updateMany({ productId: duplicate._id }, {
+    await SalesData.updateMany(workspaceFilter(req, { productId: duplicate._id }), {
       productId: master._id,
       "productSnapshot.sku": master.sku,
       "productSnapshot.name": master.name,
       "productSnapshot.category": master.category
     });
-    await DemandModel.updateMany({ productId: duplicate._id }, { productId: master._id });
-    await Recommendation.updateMany({ productId: duplicate._id }, { productId: master._id });
-    await RecommendationOutcome.updateMany({ productId: duplicate._id }, { productId: master._id });
+    await DemandModel.updateMany(workspaceFilter(req, { productId: duplicate._id }), { productId: master._id });
+    await Recommendation.updateMany(workspaceFilter(req, { productId: duplicate._id }), { productId: master._id });
+    await RecommendationOutcome.updateMany(workspaceFilter(req, { productId: duplicate._id }), { productId: master._id });
     master.aliases = [...new Set([...(master.aliases || []), duplicate.name, duplicate.sku, ...(duplicate.aliases || [])].filter(Boolean))];
     master.externalProductIds = [...new Set([...(master.externalProductIds || []), ...(duplicate.externalProductIds || [])].filter(Boolean))];
     master.matchConfidence = Math.max(Number(master.matchConfidence || 0), Number(duplicate.matchConfidence || 0), 0.95);
     await master.save();
     await Product.findByIdAndDelete(duplicate._id);
+    await logAudit(req, {
+      action: "product.merged",
+      targetType: "Product",
+      targetId: master._id,
+      summary: `Merged ${duplicate.name} into ${master.name}`,
+      metadata: { duplicateProductId }
+    });
 
     res.json({
       success: true,
@@ -174,7 +186,14 @@ productRouter.post("/", requireApiKey, requireAuth(["admin"]), async (req, res, 
       category: req.body.category,
       basePrice: req.body.basePrice,
       cost: req.body.cost,
-      inventory: req.body.inventory
+      inventory: req.body.inventory,
+      workspaceId: getWorkspaceId(req)
+    });
+    await logAudit(req, {
+      action: "product.created",
+      targetType: "Product",
+      targetId: product._id,
+      summary: `Product created: ${product.name}`
     });
 
     res.status(201).json({
@@ -192,7 +211,7 @@ productRouter.get("/:productId/sales", async (req, res, next) => {
     const requestedLimit = Number.parseInt(req.query.limit || "100", 10);
     const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 100, 1), 500);
     const skip = (page - 1) * limit;
-    const query = { productId: req.params.productId };
+    const query = workspaceFilter(req, { productId: req.params.productId });
     const sales = await SalesData.find(query)
       .sort({ date: 1, customerSegment: 1 })
       .skip(skip)

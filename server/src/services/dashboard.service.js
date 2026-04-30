@@ -5,6 +5,7 @@ import { getRecommendationPerformance } from "./recommendation-outcome.service.j
 import { SalesData } from "../models/sales-data.model.js";
 import { getActiveImportBatchFilter, listImportBatches } from "./import-batch.service.js";
 import { formatSegmentLabel } from "../utils/segments.js";
+import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 
 function round(value, digits = 2) {
   return Number(Number(value || 0).toFixed(digits));
@@ -16,6 +17,8 @@ function getReadinessMode(readiness) {
 }
 
 export async function getDashboardSummary() {
+  const workspaceMatch = { workspaceId: DEFAULT_WORKSPACE_ID };
+  const activeImportBatchFilter = await getActiveImportBatchFilter();
   const revenueExpression = { $ifNull: ["$revenue", { $multiply: ["$price", "$quantity"] }] };
   const rowProfitExpression = {
     $subtract: [
@@ -24,10 +27,11 @@ export async function getDashboardSummary() {
     ]
   };
   const [products, modelCount, recommendationCount, productSales, segments, trend, sources, recentRecommendations, readiness] = await Promise.all([
-    Product.find().sort({ name: 1 }).lean(),
-    DemandModel.countDocuments(),
-    Recommendation.countDocuments(),
+    Product.find(workspaceMatch).sort({ name: 1 }).lean(),
+    DemandModel.countDocuments(workspaceMatch),
+    Recommendation.countDocuments(workspaceMatch),
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: "$productId",
@@ -44,6 +48,7 @@ export async function getDashboardSummary() {
       { $sort: { revenue: -1 } }
     ]),
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: {
@@ -58,6 +63,7 @@ export async function getDashboardSummary() {
       { $sort: { revenue: -1 } }
     ]),
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: { $dateToString: { format: "%Y-%m", date: "$date" } },
@@ -69,6 +75,7 @@ export async function getDashboardSummary() {
       { $limit: 12 }
     ]),
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: "$importMeta.source",
@@ -79,7 +86,7 @@ export async function getDashboardSummary() {
       },
       { $sort: { lastImportedAt: -1 } }
     ]),
-    Recommendation.find().sort({ createdAt: -1 }).limit(5).populate("productId", "name sku category").lean(),
+    Recommendation.find(workspaceMatch).sort({ createdAt: -1 }).limit(5).populate("productId", "name sku category").lean(),
     getInsightReadiness()
   ]);
 
@@ -186,9 +193,11 @@ export async function getDashboardSummary() {
 export async function getDataQualitySummary() {
   const readiness = await getInsightReadiness();
   const importBatches = await listImportBatches();
+  const activeImportBatchFilter = await getActiveImportBatchFilter();
   const revenueExpression = { $ifNull: ["$revenue", { $multiply: ["$price", "$quantity"] }] };
   const [overview, sources, optional, segments] = await Promise.all([
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: null,
@@ -206,6 +215,7 @@ export async function getDataQualitySummary() {
       }
     ]),
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: "$importMeta.source",
@@ -217,6 +227,7 @@ export async function getDataQualitySummary() {
       { $sort: { latestRow: -1 } }
     ]),
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: null,
@@ -227,6 +238,7 @@ export async function getDataQualitySummary() {
       }
     ]),
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: { key: "$customerSegment", label: "$customerSegmentLabel" },
@@ -289,8 +301,10 @@ export async function getDataQualitySummary() {
 }
 
 export async function getProductIntelligence() {
+  const activeImportBatchFilter = await getActiveImportBatchFilter();
   const revenueExpression = { $ifNull: ["$revenue", { $multiply: ["$price", "$quantity"] }] };
   const rows = await SalesData.aggregate([
+    { $match: activeImportBatchFilter },
     {
       $group: {
         _id: "$productId",
@@ -363,8 +377,10 @@ export async function getProductIntelligence() {
 }
 
 export async function getCustomerSegmentSummary() {
+  const activeImportBatchFilter = await getActiveImportBatchFilter();
   const revenueExpression = { $ifNull: ["$revenue", { $multiply: ["$price", "$quantity"] }] };
   const rows = await SalesData.aggregate([
+    { $match: activeImportBatchFilter },
     {
       $group: {
         _id: { key: "$customerSegment", label: "$customerSegmentLabel" },
@@ -401,8 +417,9 @@ export async function getCustomerSegmentSummary() {
 }
 
 export async function getCompetitorMarketSummary() {
+  const activeImportBatchFilter = await getActiveImportBatchFilter();
   const rows = await SalesData.aggregate([
-    { $match: { competitorPrice: { $ne: null } } },
+    { $match: { ...activeImportBatchFilter, competitorPrice: { $ne: null } } },
     {
       $group: {
         _id: "$productId",
@@ -453,9 +470,11 @@ export async function getCompetitorMarketSummary() {
 }
 
 export async function getSeasonalitySummary() {
+  const activeImportBatchFilter = await getActiveImportBatchFilter();
   const revenueExpression = { $ifNull: ["$revenue", { $multiply: ["$price", "$quantity"] }] };
   const [monthly, promotionSplit, weekendSplit] = await Promise.all([
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: "$dateParts.month",
@@ -469,6 +488,7 @@ export async function getSeasonalitySummary() {
       { $sort: { _id: 1 } }
     ]),
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: "$promotion",
@@ -480,6 +500,7 @@ export async function getSeasonalitySummary() {
       }
     ]),
     SalesData.aggregate([
+      { $match: activeImportBatchFilter },
       {
         $group: {
           _id: "$dateParts.isWeekend",
@@ -558,7 +579,9 @@ function correlation(leftValues, rightValues) {
 }
 
 export async function getProductRelationships() {
+  const activeImportBatchFilter = await getActiveImportBatchFilter();
   const rows = await SalesData.aggregate([
+    { $match: activeImportBatchFilter },
     {
       $group: {
         _id: {

@@ -1,6 +1,7 @@
 import { Recommendation } from "../models/recommendation.model.js";
 import { RecommendationOutcome } from "../models/recommendation-outcome.model.js";
 import { SalesData } from "../models/sales-data.model.js";
+import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 import { round } from "./simulation.service.js";
 
 function parseDate(value, fallback) {
@@ -14,6 +15,7 @@ function parseDate(value, fallback) {
 async function measureActuals({ recommendation, appliedPrice, startDate, endDate }) {
   const priceTolerance = Math.max(Number(appliedPrice || 0) * 0.025, 0.01);
   const query = {
+    workspaceId: recommendation.workspaceId || DEFAULT_WORKSPACE_ID,
     productId: recommendation.productId,
     date: { $gte: startDate, $lte: endDate },
     price: { $gte: appliedPrice - priceTolerance, $lte: appliedPrice + priceTolerance }
@@ -51,8 +53,8 @@ async function measureActuals({ recommendation, appliedPrice, startDate, endDate
   };
 }
 
-export async function applyRecommendation({ recommendationId, appliedPrice, startDate, endDate, expectedTarget, notes }) {
-  const recommendation = await Recommendation.findById(recommendationId).lean();
+export async function applyRecommendation({ recommendationId, appliedPrice, startDate, endDate, expectedTarget, notes, workspaceId = DEFAULT_WORKSPACE_ID }) {
+  const recommendation = await Recommendation.findOne({ _id: recommendationId, workspaceId }).lean();
 
   if (!recommendation) {
     throw new Error("Recommendation not found");
@@ -93,8 +95,9 @@ export async function applyRecommendation({ recommendationId, appliedPrice, star
   const status = measured ? (targetHit ? "Measured" : "Missed") : "Applied";
 
   const outcome = await RecommendationOutcome.findOneAndUpdate(
-    { recommendationId },
+    { recommendationId, workspaceId },
     {
+      workspaceId,
       recommendationId,
       productId: recommendation.productId,
       segment: recommendation.segment,
@@ -142,12 +145,12 @@ export async function applyRecommendation({ recommendationId, appliedPrice, star
   return outcome;
 }
 
-export async function getRecommendationOutcome(recommendationId) {
-  return RecommendationOutcome.findOne({ recommendationId }).populate("productId", "name sku category").lean();
+export async function getRecommendationOutcome(recommendationId, workspaceId = DEFAULT_WORKSPACE_ID) {
+  return RecommendationOutcome.findOne({ recommendationId, workspaceId }).populate("productId", "name sku category").lean();
 }
 
-export async function getRecommendationPerformance() {
-  const outcomes = await RecommendationOutcome.find().sort({ updatedAt: -1 }).limit(200).populate("productId", "name sku category").lean();
+export async function getRecommendationPerformance(workspaceId = DEFAULT_WORKSPACE_ID) {
+  const outcomes = await RecommendationOutcome.find({ workspaceId }).sort({ updatedAt: -1 }).limit(200).populate("productId", "name sku category").lean();
   const measured = outcomes.filter((item) => item.status === "Measured" || item.status === "Missed");
 
   return {

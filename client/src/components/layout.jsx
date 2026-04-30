@@ -109,6 +109,7 @@ export function AppShell({
   apiBaseUrl,
   children,
   databaseStatus,
+  datasetSummary,
   error,
   health,
   isSidebarOpen,
@@ -141,10 +142,17 @@ export function AppShell({
                 <div className="min-w-0">
                   <p className="text-xs font-medium uppercase text-slate-500">Pricing Management</p>
                   <h1 className="mt-1 truncate text-2xl font-semibold tracking-normal">{activeItem.label}</h1>
+                  {activeItem.description && <p className="mt-1 max-w-3xl text-sm text-slate-500">{activeItem.description}</p>}
                 </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
+                {datasetSummary && (
+                  <div className={`hidden max-w-xs rounded-md border px-3 py-1.5 text-xs sm:block ${datasetSummary.warning ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-600"}`}>
+                    <p className="truncate font-medium">{datasetSummary.label}</p>
+                    <p className="mt-0.5 truncate">{datasetSummary.detail}</p>
+                  </div>
+                )}
                 <div className="hidden items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 sm:flex">
                   <UserRound size={14} />
                   <span>{session.user.name}</span>
@@ -217,7 +225,7 @@ export function LoginScreen({ onLogin }) {
 
   function handleRoleChange(nextRole) {
     setRole(nextRole);
-    setPassword(nextRole === "admin" ? "admin123" : "analyst123");
+    setPassword(nextRole === "admin" ? "admin123" : nextRole === "analyst" ? "analyst123" : "manager123");
     setLoginMessage("");
   }
 
@@ -233,7 +241,7 @@ export function LoginScreen({ onLogin }) {
           <p className="mt-4 max-w-xl text-base leading-7 text-slate-600">
             Use the demo roles to show an examiner that uploads, resets, settings, simulations, and reports are controlled by authenticated access.
           </p>
-          <div className="mt-6 grid max-w-xl gap-3 sm:grid-cols-2">
+          <div className="mt-6 grid max-w-xl gap-3 sm:grid-cols-3">
             <div className="rounded-lg border border-slate-200 bg-white p-4">
               <ShieldCheck className="text-slate-700" size={20} />
               <p className="mt-3 text-sm font-semibold">Admin</p>
@@ -243,6 +251,11 @@ export function LoginScreen({ onLogin }) {
               <UserRound className="text-slate-700" size={20} />
               <p className="mt-3 text-sm font-semibold">Analyst</p>
               <p className="mt-1 text-sm text-slate-500">View insights, simulate prices, create recommendations, and export reports.</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <UserRound className="text-slate-700" size={20} />
+              <p className="mt-3 text-sm font-semibold">Manager</p>
+              <p className="mt-1 text-sm text-slate-500">View dashboards, reports, recommendations, and outcomes.</p>
             </div>
           </div>
         </div>
@@ -258,15 +271,15 @@ export function LoginScreen({ onLogin }) {
             </div>
           </div>
 
-          <div className="mt-6 grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1">
-            {["admin", "analyst"].map((item) => (
+          <div className="mt-6 grid grid-cols-3 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1">
+            {["admin", "analyst", "manager"].map((item) => (
               <button
                 className={`h-10 rounded-md text-sm font-medium ${role === item ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white"}`}
                 key={item}
                 onClick={() => handleRoleChange(item)}
                 type="button"
               >
-                {item === "admin" ? "Admin" : "Analyst"}
+                {item === "admin" ? "Admin" : item === "analyst" ? "Analyst" : "Manager"}
               </button>
             ))}
           </div>

@@ -1,13 +1,16 @@
 import { Router } from "express";
 import mongoose from "mongoose";
 import { Recommendation } from "../models/recommendation.model.js";
+import { requireAuth } from "../middleware/auth.middleware.js";
+import { logAudit } from "../services/audit.service.js";
 import { applyRecommendation, getRecommendationOutcome } from "../services/recommendation-outcome.service.js";
 import { recommendPrice } from "../services/recommendation.service.js";
 import { formatSegmentLabel } from "../utils/segments.js";
+import { workspaceFilter } from "../utils/workspace.js";
 
 export const recommendationRouter = Router();
 
-recommendationRouter.post("/", async (req, res, next) => {
+recommendationRouter.post("/", requireAuth(["admin", "analyst"]), async (req, res, next) => {
   try {
     const { productId } = req.body;
 
@@ -18,7 +21,18 @@ recommendationRouter.post("/", async (req, res, next) => {
       });
     }
 
-    const recommendation = await recommendPrice(req.body);
+    const recommendation = await recommendPrice({ ...req.body, workspaceId: req.workspaceId });
+    await logAudit(req, {
+      action: "recommendation.created",
+      targetType: "Recommendation",
+      targetId: recommendation._id,
+      summary: `Recommendation created for ${recommendation.product?.name || "product"}`,
+      metadata: {
+        productId,
+        objective: recommendation.objective,
+        recommendedPrice: recommendation.recommendedPrice
+      }
+    });
 
     res.status(201).json({
       success: true,
@@ -32,7 +46,7 @@ recommendationRouter.post("/", async (req, res, next) => {
 
 recommendationRouter.get("/", async (req, res, next) => {
   try {
-    const query = {};
+    const query = workspaceFilter(req);
 
     if (req.query.productId) {
       if (!mongoose.Types.ObjectId.isValid(req.query.productId)) {
@@ -64,7 +78,7 @@ recommendationRouter.get("/", async (req, res, next) => {
   }
 });
 
-recommendationRouter.post("/:id/apply", async (req, res, next) => {
+recommendationRouter.post("/:id/apply", requireAuth(["admin", "manager"]), async (req, res, next) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
@@ -79,7 +93,19 @@ recommendationRouter.post("/:id/apply", async (req, res, next) => {
       startDate: req.body.startDate,
       endDate: req.body.endDate,
       expectedTarget: req.body.expectedTarget,
-      notes: req.body.notes
+      notes: req.body.notes,
+      workspaceId: req.workspaceId
+    });
+    await logAudit(req, {
+      action: "recommendation.applied",
+      targetType: "Recommendation",
+      targetId: req.params.id,
+      summary: "Recommendation applied/measured",
+      metadata: {
+        appliedPrice: req.body.appliedPrice,
+        startDate: req.body.startDate,
+        endDate: req.body.endDate
+      }
     });
 
     res.json({
@@ -103,7 +129,7 @@ recommendationRouter.get("/:id/outcome", async (req, res, next) => {
 
     res.json({
       success: true,
-      data: await getRecommendationOutcome(req.params.id)
+      data: await getRecommendationOutcome(req.params.id, req.workspaceId)
     });
   } catch (error) {
     next(error);

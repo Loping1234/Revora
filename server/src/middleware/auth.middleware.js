@@ -27,6 +27,7 @@ export function requireAuth(allowedRoles = ["admin", "analyst"]) {
     }
 
     req.user = user;
+    req.workspaceId = user.workspaceId || "default-workspace";
     return next();
   };
 }

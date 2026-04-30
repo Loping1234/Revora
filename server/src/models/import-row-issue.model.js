@@ -1,7 +1,14 @@
 import mongoose from "mongoose";
+import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 
 const importRowIssueSchema = new mongoose.Schema(
   {
+    workspaceId: {
+      type: String,
+      required: true,
+      default: DEFAULT_WORKSPACE_ID,
+      index: true
+    },
     importBatchId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "ImportBatch",
@@ -33,5 +40,7 @@ const importRowIssueSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+importRowIssueSchema.index({ workspaceId: 1, importBatchId: 1 });
 
 export const ImportRowIssue = mongoose.model("ImportRowIssue", importRowIssueSchema);

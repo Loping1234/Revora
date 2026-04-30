@@ -6,8 +6,46 @@ import { Product } from "../models/product.model.js";
 import { RecommendationOutcome } from "../models/recommendation-outcome.model.js";
 import { Recommendation } from "../models/recommendation.model.js";
 import { SalesData } from "../models/sales-data.model.js";
+import { logAudit } from "../services/audit.service.js";
+import { workspaceFilter } from "../utils/workspace.js";
 
 export const adminRouter = Router();
+
+async function getResetCounts(req) {
+  const filter = workspaceFilter(req);
+  const [salesRows, products, pricingInsights, recommendations, recommendationOutcomes, importBatches, importRowIssues] = await Promise.all([
+    SalesData.countDocuments(filter),
+    Product.countDocuments(filter),
+    DemandModel.countDocuments(filter),
+    Recommendation.countDocuments(filter),
+    RecommendationOutcome.countDocuments(filter),
+    ImportBatch.countDocuments(filter),
+    ImportRowIssue.countDocuments(filter)
+  ]);
+
+  return {
+    salesRows,
+    products,
+    pricingInsights,
+    recommendations,
+    recommendationOutcomes,
+    importBatches,
+    importRowIssues
+  };
+}
+
+adminRouter.get("/reset-preview", async (req, res, next) => {
+  try {
+    res.json({
+      success: true,
+      data: {
+        willDelete: await getResetCounts(req)
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 adminRouter.post("/reset-data", async (req, res, next) => {
   try {
@@ -18,14 +56,23 @@ adminRouter.post("/reset-data", async (req, res, next) => {
       });
     }
 
+    const preview = await getResetCounts(req);
+    await logAudit(req, {
+      action: "admin.reset_data",
+      targetType: "Workspace",
+      summary: "Workspace data reset requested",
+      metadata: { willDelete: preview }
+    });
+
+    const filter = workspaceFilter(req);
     const [salesData, products, demandModels, recommendations, recommendationOutcomes, importBatches, importRowIssues] = await Promise.all([
-      SalesData.deleteMany({}),
-      Product.deleteMany({}),
-      DemandModel.deleteMany({}),
-      Recommendation.deleteMany({}),
-      RecommendationOutcome.deleteMany({}),
-      ImportBatch.deleteMany({}),
-      ImportRowIssue.deleteMany({})
+      SalesData.deleteMany(filter),
+      Product.deleteMany(filter),
+      DemandModel.deleteMany(filter),
+      Recommendation.deleteMany(filter),
+      RecommendationOutcome.deleteMany(filter),
+      ImportBatch.deleteMany(filter),
+      ImportRowIssue.deleteMany(filter)
     ]);
 
     res.json({

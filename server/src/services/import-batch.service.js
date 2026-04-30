@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { ImportBatch } from "../models/import-batch.model.js";
 import { WorkspaceSettings } from "../models/workspace-settings.model.js";
+import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 
 const DEFAULT_SETTINGS = {
   companyName: "Pricing Manager",
@@ -18,13 +19,15 @@ function normalizeBatchId(value) {
 }
 
 export async function getActiveImportBatchId() {
-  const settings = await WorkspaceSettings.findOne().select("activeImportBatchId").lean();
+  const settings = await WorkspaceSettings.findOne({ workspaceId: DEFAULT_WORKSPACE_ID }).select("activeImportBatchId").lean();
   return normalizeBatchId(settings?.activeImportBatchId);
 }
 
 export async function getActiveImportBatchFilter() {
   const activeImportBatchId = await getActiveImportBatchId();
-  return activeImportBatchId ? { importBatchId: new mongoose.Types.ObjectId(activeImportBatchId) } : {};
+  return activeImportBatchId
+    ? { workspaceId: DEFAULT_WORKSPACE_ID, importBatchId: new mongoose.Types.ObjectId(activeImportBatchId) }
+    : { workspaceId: DEFAULT_WORKSPACE_ID };
 }
 
 export async function setActiveImportBatch(importBatchId) {
@@ -37,7 +40,7 @@ export async function setActiveImportBatch(importBatchId) {
   }
 
   if (normalizedId) {
-    const batch = await ImportBatch.findById(normalizedId).lean();
+    const batch = await ImportBatch.findOne({ _id: normalizedId, workspaceId: DEFAULT_WORKSPACE_ID }).lean();
 
     if (!batch) {
       const error = new Error("Import batch not found");
@@ -47,10 +50,10 @@ export async function setActiveImportBatch(importBatchId) {
   }
 
   const settings = await WorkspaceSettings.findOneAndUpdate(
-    {},
+    { workspaceId: DEFAULT_WORKSPACE_ID },
     {
       $set: { activeImportBatchId: normalizedId ? new mongoose.Types.ObjectId(normalizedId) : null },
-      $setOnInsert: DEFAULT_SETTINGS
+      $setOnInsert: { ...DEFAULT_SETTINGS, workspaceId: DEFAULT_WORKSPACE_ID }
     },
     { new: true, upsert: true, runValidators: true }
   ).lean();
@@ -64,10 +67,10 @@ export async function setLatestImportBatchActive(importBatchId) {
   if (!normalizedId) return null;
 
   await WorkspaceSettings.findOneAndUpdate(
-    {},
+    { workspaceId: DEFAULT_WORKSPACE_ID },
     {
       $set: { activeImportBatchId: new mongoose.Types.ObjectId(normalizedId) },
-      $setOnInsert: DEFAULT_SETTINGS
+      $setOnInsert: { ...DEFAULT_SETTINGS, workspaceId: DEFAULT_WORKSPACE_ID }
     },
     { new: true, upsert: true, runValidators: true }
   );
@@ -78,7 +81,7 @@ export async function setLatestImportBatchActive(importBatchId) {
 export async function listImportBatches() {
   const [activeImportBatchId, batches] = await Promise.all([
     getActiveImportBatchId(),
-    ImportBatch.find().sort({ createdAt: -1 }).limit(25).lean()
+    ImportBatch.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ createdAt: -1 }).limit(25).lean()
   ]);
 
   return {

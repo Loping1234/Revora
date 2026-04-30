@@ -130,6 +130,18 @@ export function HomeOverview({
     "Generate recommendation",
     "Export recommendation with assumptions"
   ];
+  const flowSteps = businessFlow.map((label, index) => ({
+    label,
+    done:
+      (index <= 1 && salesRecords > 0) ||
+      (index === 2 && modelCount > 0) ||
+      (index >= 4 && Number(metrics.recommendationCount || 0) > 0),
+    current:
+      (index === 0 && !salesRecords) ||
+      (index === 2 && salesRecords > 0 && !modelCount) ||
+      (index === 3 && modelCount > 0 && !Number(metrics.recommendationCount || 0)) ||
+      (index === 5 && Number(metrics.recommendationCount || 0) > 0)
+  }));
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -160,6 +172,38 @@ export function HomeOverview({
         </div>
         {dashboardMessage && dashboardState === "error" && <p className="mt-3 text-sm text-rose-700">{dashboardMessage}</p>}
         {resetMessage && <p className={`mt-3 text-sm ${resetState === "error" ? "text-rose-700" : "text-emerald-700"}`}>{resetMessage}</p>}
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-950">Pricing workflow</h3>
+            <p className="mt-1 text-xs text-slate-500">Use this path while presenting the project: data, quality, insight, decision, export.</p>
+          </div>
+          <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+            {flowSteps.filter((step) => step.done).length}/{flowSteps.length} complete
+          </span>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+          {flowSteps.map((step, index) => (
+            <div
+              className={`rounded-md border p-3 ${
+                step.done
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  : step.current
+                    ? "border-amber-200 bg-amber-50 text-amber-900"
+                    : "border-slate-200 bg-slate-50 text-slate-600"
+              }`}
+              key={step.label}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold">Step {index + 1}</span>
+                {step.done ? <CheckCircle2 size={14} /> : <span className="text-xs">{step.current ? "Next" : "Later"}</span>}
+              </div>
+              <p className="mt-2 text-sm font-medium">{step.label}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
       {isEmpty && (
