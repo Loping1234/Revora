@@ -17,7 +17,7 @@ function getReadinessMode(readiness) {
 }
 
 export async function getDashboardSummary() {
-  const workspaceMatch = { workspaceId: DEFAULT_WORKSPACE_ID };
+  const workspaceMatch = { workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active" };
   const activeImportBatchFilter = await getActiveImportBatchFilter();
   const revenueExpression = { $ifNull: ["$revenue", { $multiply: ["$price", "$quantity"] }] };
   const rowProfitExpression = {
@@ -291,6 +291,7 @@ export async function getDataQualitySummary() {
     })),
     importBatches: importBatches.batches,
     activeImportBatchId: importBatches.activeImportBatchId,
+    rollbackAvailable: importBatches.batches.some((batch) => batch.status === "archived" && batch.committedAt),
     optionalValues: {
       regions: (optionalBase.regions || []).filter(Boolean),
       channels: (optionalBase.channels || []).filter(Boolean),
@@ -703,7 +704,7 @@ export function assessReadinessSummary(summary) {
 export async function getInsightReadiness() {
   const activeImportBatchFilter = await getActiveImportBatchFilter();
   const rows = await SalesData.aggregate([
-    { $match: activeImportBatchFilter },
+    { $match: { ...activeImportBatchFilter, excludedFromModel: { $ne: true } } },
     {
       $group: {
         _id: {

@@ -133,7 +133,7 @@ export async function uploadSalesCsv(file) {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await fetch(`${API_BASE_URL}/upload/sales`, {
+  const response = await fetch(`${API_BASE_URL}/upload/sales/stage`, {
     method: "POST",
     headers: apiHeaders(),
     body: formData
@@ -148,6 +148,83 @@ export async function uploadSalesCsv(file) {
     const error = new Error(payload?.error?.message || `Upload failed with status ${response.status}`);
     error.status = response.status;
     throw error;
+  }
+
+  return payload;
+}
+
+export async function previewSalesCsv(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${API_BASE_URL}/upload/sales/preview`, {
+    method: "POST",
+    headers: apiHeaders(),
+    body: formData
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `Preview failed with status ${response.status}`);
+  }
+
+  return payload;
+}
+
+export async function getImportBatchReview(importBatchId) {
+  const response = await fetch(`${API_BASE_URL}/upload/sales/batches/${importBatchId}/review`, {
+    headers: apiHeaders()
+  });
+
+  return assertOk(response, `Import review failed with status ${response.status}`);
+}
+
+export async function commitImportBatch(importBatchId) {
+  const response = await fetch(`${API_BASE_URL}/upload/sales/batches/${importBatchId}/commit`, {
+    method: "POST",
+    headers: apiHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({ confirm: "COMMIT" })
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `Commit failed with status ${response.status}`);
+  }
+
+  return payload;
+}
+
+export async function rejectImportBatch(importBatchId) {
+  const response = await fetch(`${API_BASE_URL}/upload/sales/batches/${importBatchId}/reject`, {
+    method: "POST",
+    headers: apiHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({ confirm: "REJECT" })
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `Reject failed with status ${response.status}`);
+  }
+
+  return payload;
+}
+
+export async function rollbackImportBatch(importBatchId) {
+  const response = await fetch(`${API_BASE_URL}/upload/sales/batches/${importBatchId}/rollback`, {
+    method: "POST",
+    headers: apiHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({ confirm: "ROLLBACK" })
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `Rollback failed with status ${response.status}`);
   }
 
   return payload;

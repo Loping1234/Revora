@@ -52,8 +52,10 @@ import {
   SummaryCard,
   WarningPanel
 } from "./common";
+import { useViewMode } from "../lib/view-mode";
 
 export function ReportsExportPanel({ recommendations, exportState, exportMessage, handleDownloadReport }) {
+  const { detailed } = useViewMode();
   const reportCards = [
     { type: "dashboard", title: "Dashboard Report", note: "Home metrics, revenue trend, top products, categories, and customer groups.", filename: "pricing-dashboard-report.xlsx" },
     { type: "products", title: "Products Report", note: "Product table with price, cost, inventory, readiness, and model status.", filename: "pricing-products-report.xlsx" },
@@ -92,6 +94,7 @@ export function ReportsExportPanel({ recommendations, exportState, exportMessage
         </div>
       </div>
 
+      {detailed && (
       <section className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
         <div className="flex items-center gap-3 text-slate-700">
           <CheckCircle2 size={18} />
@@ -105,6 +108,7 @@ export function ReportsExportPanel({ recommendations, exportState, exportMessage
           ))}
         </div>
       </section>
+      )}
 
       <div className="mt-5 grid gap-3 lg:grid-cols-2">
         {reportCards.map((report) => (

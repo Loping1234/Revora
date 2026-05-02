@@ -137,7 +137,7 @@ export function sendWorkbook(res, workbook, filename) {
 }
 
 async function getEnrichedProducts() {
-  const workspaceMatch = { workspaceId: DEFAULT_WORKSPACE_ID };
+  const workspaceMatch = { workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active" };
   const products = await Product.find(workspaceMatch).sort({ name: 1 }).lean();
   const salesCounts = await SalesData.aggregate([
     { $match: workspaceMatch },
@@ -273,7 +273,7 @@ export async function buildProductsWorkbook() {
 }
 
 export async function buildSalesDataWorkbook(source) {
-  const query = source ? { workspaceId: DEFAULT_WORKSPACE_ID, "importMeta.source": source } : { workspaceId: DEFAULT_WORKSPACE_ID };
+  const query = source ? { workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active", "importMeta.source": source } : { workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active" };
   const [rows, batch] = await Promise.all([
     SalesData.find(query).sort({ createdAt: -1 }).limit(5000).lean(),
     source ? ImportBatch.findOne({ workspaceId: DEFAULT_WORKSPACE_ID, source }).sort({ createdAt: -1 }).lean() : null
@@ -320,11 +320,11 @@ export async function buildSalesDataWorkbook(source) {
 }
 
 export async function buildPricingInsightsWorkbook() {
-  const models = await DemandModel.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ updatedAt: -1 }).populate("productId", "name sku category").lean();
+  const models = await DemandModel.find({ workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active" }).sort({ updatedAt: -1 }).populate("productId", "name sku category").lean();
   const workbook = createWorkbook("Pricing Insights Report");
   const sheet = workbook.addWorksheet("Pricing Insights");
   addTitle(sheet, "Pricing Insights Report", "Fitted demand models with model reliability, formulas, and warnings.");
-  addTable(sheet, ["Product", "SKU", "Segment", "Readiness", "Data Fitness", "Fitness Score", "Cost Quality", "Business Risk", "Model", "Model Reliability", "Score", "Grouped Points", "Raw Rows", "Distinct Prices", "Historical Fit", "Demand Error %", "Revenue Error %", "Profit Error %", "ML Ready", "Formula", "Evidence Summary", "Blocked Reasons", "Warnings"], models.map((model) => [
+  addTable(sheet, ["Product", "SKU", "Segment", "Readiness", "Data Fitness", "Fitness Score", "Cost Quality", "Business Risk", "Model", "Model Reliability", "Score", "Grouped Points", "Raw Rows", "Distinct Prices", "Historical Fit", "Demand Error %", "Revenue Error %", "Profit Error %", "Beats Baseline", "Baseline MAPE", "Model Improvement", "ML Ready", "Formula", "Evidence Summary", "Blocked Reasons", "Warnings"], models.map((model) => [
     model.productId?.name,
     model.productId?.sku,
     model.segment,
@@ -343,6 +343,9 @@ export async function buildPricingInsightsWorkbook() {
     (model.backtestMetrics || model.accuracyMetrics)?.available ? (model.backtestMetrics || model.accuracyMetrics).demandMAPE : "",
     (model.backtestMetrics || model.accuracyMetrics)?.available ? (model.backtestMetrics || model.accuracyMetrics).revenueMAPE : "",
     (model.backtestMetrics || model.accuracyMetrics)?.available ? (model.backtestMetrics || model.accuracyMetrics).profitMAPE : "",
+    (model.backtestMetrics || model.accuracyMetrics)?.baselineComparison?.available ? ((model.backtestMetrics || model.accuracyMetrics).baselineComparison.modelBeatsBaseline ? "Yes" : "No") : "N/A",
+    (model.backtestMetrics || model.accuracyMetrics)?.baselineComparison?.available ? (model.backtestMetrics || model.accuracyMetrics).baselineComparison.bestBaselineMAPE : "",
+    (model.backtestMetrics || model.accuracyMetrics)?.baselineComparison?.available ? `${(model.backtestMetrics || model.accuracyMetrics).baselineComparison.improvementPercent}%` : "",
     model.mlReadiness?.ready ? "Yes" : "No",
     model.formulaText,
     model.evidenceSummary ? JSON.stringify(model.evidenceSummary) : "",
@@ -354,14 +357,15 @@ export async function buildPricingInsightsWorkbook() {
     ["Model formula", "The selected price-response model estimates demand from historical price and quantity movement."],
     ["Historical fit", "Shows how well the formula fits historical grouped demand points; it is not a future guarantee."],
     ["Backtest error", "Older grouped points are used for training and newer grouped points are held out for error checking."],
-    ["Model reliability", "Requires enough grouped points, enough price levels, normal price-response direction, and acceptable backtest evidence."]
+    ["Model reliability", "Requires enough grouped points, enough price levels, normal price-response direction, and acceptable backtest evidence."],
+    ["Baseline comparison", "The model's held-out demand error is compared against three naive methods (Average Demand, Last Observation, 3-Point Moving Average). The model must outperform the best naive baseline to be considered reliable for recommendations."]
   ]);
   return finalizeWorkbook(workbook);
 }
 
 export async function buildRecommendationsWorkbook(historyOnly = false) {
-  const recommendations = await Recommendation.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ createdAt: -1 }).limit(500).populate("productId", "name sku category").lean();
-  const outcomes = await RecommendationOutcome.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ updatedAt: -1 }).limit(500).populate("productId", "name sku category").lean();
+  const recommendations = await Recommendation.find({ workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active" }).sort({ createdAt: -1 }).limit(500).populate("productId", "name sku category").lean();
+  const outcomes = await RecommendationOutcome.find({ workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active" }).sort({ updatedAt: -1 }).limit(500).populate("productId", "name sku category").lean();
   const workbook = createWorkbook(historyOnly ? "Recommendation History Report" : "Recommendations Report");
   const sheet = workbook.addWorksheet(historyOnly ? "History" : "Recommendations");
   addTitle(sheet, historyOnly ? "Recommendation History Report" : "Recommendations Report", "Saved pricing recommendations with assumptions and explanations.");
@@ -434,9 +438,9 @@ export async function buildExaminerWorkbook() {
   const workbook = createWorkbook("Examiner Workbook");
   const dashboard = await getDashboardSummary();
   const products = await getEnrichedProducts();
-  const models = await DemandModel.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ updatedAt: -1 }).populate("productId", "name sku category").lean();
-  const recommendations = await Recommendation.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ createdAt: -1 }).limit(100).populate("productId", "name sku category").lean();
-  const outcomes = await RecommendationOutcome.find({ workspaceId: DEFAULT_WORKSPACE_ID }).sort({ updatedAt: -1 }).limit(100).populate("productId", "name sku category").lean();
+  const models = await DemandModel.find({ workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active" }).sort({ updatedAt: -1 }).populate("productId", "name sku category").lean();
+  const recommendations = await Recommendation.find({ workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active" }).sort({ createdAt: -1 }).limit(100).populate("productId", "name sku category").lean();
+  const outcomes = await RecommendationOutcome.find({ workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active" }).sort({ updatedAt: -1 }).limit(100).populate("productId", "name sku category").lean();
   const executive = workbook.addWorksheet("Executive Summary");
   addTitle(executive, "Examiner Workbook", "A polished overview of imported data, models, recommendations, and limitations.");
   addKeyValues(executive, [
@@ -461,7 +465,8 @@ export async function buildExaminerWorkbook() {
     ["Pricing insight", "Raw rows are grouped into demand points before model fitting."],
     ["Scenario/recommendation revenue", "Chosen price x estimated demand."],
     ["Scenario/recommendation profit", "(Chosen price - product cost) x estimated demand."],
-    ["Model reliability", "Based on grouped points, price levels, price-response direction, historical fit, and backtest evidence."]
+    ["Model reliability", "Based on grouped points, price levels, price-response direction, historical fit, and backtest evidence."],
+    ["Baseline comparison", "The model's held-out demand error is compared against three naive baselines (Average Demand, Last Observation, 3-Point Moving Average). If the model cannot outperform the best naive baseline, recommendations are blocked."]
   ]);
   addTable(workbook.addWorksheet("Assumptions"), ["Area", "Assumption / Limitation"], [
     ["Modeling", "The system uses explainable statistical models, not black-box AI."],

@@ -52,6 +52,8 @@ import {
   SummaryCard,
   WarningPanel
 } from "./common";
+import { useViewMode } from "../lib/view-mode";
+import { RevenueTrendChart } from "./charts";
 
 export function HomeOverview({
   dashboardData,
@@ -66,8 +68,16 @@ export function HomeOverview({
   setActivePanel,
   refreshDashboard,
   totalSalesRecords,
-  totalFittedModels
+  totalFittedModels,
+  uploadSummary,
+  importReview,
+  canCommitImport,
+  handleCommitImport,
+  importReviewState,
+  importReviewMessage
 }) {
+  const isQualityReview = uploadSummary?.status === "quality_review" || (uploadSummary?.importBatchId && importReview);
+
   const metrics = dashboardData?.metrics || {};
   const trend = dashboardData?.trend || [];
   const segments = (dashboardData?.segments || []).map((item) => ({ ...item, label: item.label || formatSegmentName(item.segment) }));
@@ -78,6 +88,7 @@ export function HomeOverview({
   const salesRecords = metrics.salesRecords ?? totalSalesRecords;
   const modelCount = metrics.modelCount ?? totalFittedModels;
   const isEmpty = !salesRecords;
+  const { detailed } = useViewMode();
   const [activeHomeTab, setActiveHomeTab] = useState("overview");
   const actionItems = [
     {
@@ -173,7 +184,49 @@ export function HomeOverview({
         {dashboardMessage && dashboardState === "error" && <p className="mt-3 text-sm text-rose-700">{dashboardMessage}</p>}
         {resetMessage && <p className={`mt-3 text-sm ${resetState === "error" ? "text-rose-700" : "text-emerald-700"}`}>{resetMessage}</p>}
       </section>
+      
+      {isQualityReview && (
+        <section className="rounded-lg border-2 border-amber-200 bg-amber-50 p-6 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4 text-amber-950">
+              <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-200 text-amber-700">
+                <Upload size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold">Action Needed: New Data Staged</h3>
+                <p className="mt-1 text-sm text-amber-800 leading-relaxed">
+                  You've uploaded <strong>{uploadSummary.processedRows || uploadSummary.importedRows || "a new"} sales records</strong>, but they are not active yet. 
+                  You must commit this dataset before the model can use it for insights and recommendations.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button 
+                className="inline-flex h-11 items-center justify-center rounded-md border border-slate-300 bg-white px-5 text-sm font-bold text-slate-700 shadow-sm"
+                onClick={() => setActivePanel("dataWorkspace")}
+                type="button"
+              >
+                Review Quality
+              </button>
+              <button 
+                className="inline-flex h-11 items-center justify-center rounded-md bg-slate-950 px-6 text-sm font-bold text-white shadow-sm disabled:bg-slate-400"
+                disabled={importReviewState === "running" || !canCommitImport}
+                onClick={handleCommitImport}
+                type="button"
+              >
+                {importReviewState === "running" ? "Committing..." : canCommitImport ? "Commit Verified Data" : "Admin Approval Required"}
+              </button>
+            </div>
+          </div>
+          {importReviewMessage && (
+            <p className={`mt-3 text-sm font-medium ${importReviewState === "error" ? "text-rose-700" : "text-emerald-700"}`}>
+              {importReviewMessage}
+            </p>
+          )}
+        </section>
+      )}
 
+      {detailed && (
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -205,6 +258,7 @@ export function HomeOverview({
           ))}
         </div>
       </section>
+      )}
 
       {isEmpty && (
         <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
@@ -301,7 +355,9 @@ export function HomeOverview({
                   </div>
                   <LineChart className="text-slate-500" size={18} />
                 </div>
-                <MiniRevenueTrend currency={currency} items={trend} />
+                <div className="mt-4">
+                  <RevenueTrendChart data={trend} dataKey="revenue" currency={currency} />
+                </div>
               </section>
 
               <section className="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">

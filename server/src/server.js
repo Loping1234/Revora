@@ -1,6 +1,7 @@
 import { app } from "./app.js";
 import { connectDatabase } from "./config/db.js";
 import { env } from "./config/env.js";
+import { startStagingCleanupScheduler } from "./services/staging-cleanup.service.js";
 import { ensureDefaultUsers } from "./services/user.service.js";
 import { backfillDefaultWorkspace } from "./services/workspace.service.js";
 
@@ -13,7 +14,9 @@ if (process.env.SKIP_BOOTSTRAP !== "true") {
     console.error(`Startup bootstrap failed: ${error.message}`);
   }
 }
+startStagingCleanupScheduler();
 
 app.listen(env.port, () => {
   console.log(`API server listening on http://localhost:${env.port}`);
 });
+ 

@@ -9,6 +9,20 @@ const recommendationOutcomeSchema = new mongoose.Schema(
       default: DEFAULT_WORKSPACE_ID,
       index: true
     },
+    datasetStatus: {
+      type: String,
+      enum: ["active", "archived"],
+      required: true,
+      default: "active",
+      index: true
+    },
+    archivedAt: Date,
+    archiveReason: String,
+    sourceImportBatchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ImportBatch",
+      index: true
+    },
     recommendationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Recommendation",
@@ -99,5 +113,6 @@ const recommendationOutcomeSchema = new mongoose.Schema(
 
 recommendationOutcomeSchema.index({ workspaceId: 1, recommendationId: 1 });
 recommendationOutcomeSchema.index({ workspaceId: 1, productId: 1, status: 1 });
+recommendationOutcomeSchema.index({ workspaceId: 1, datasetStatus: 1 });
 
 export const RecommendationOutcome = mongoose.model("RecommendationOutcome", recommendationOutcomeSchema);

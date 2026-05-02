@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getStoredSession, setStoredSession } from "./lib/api";
+import { ViewModeProvider } from "./lib/view-mode";
 import { AuthenticatedApp } from "./components/authenticated-app";
 import { AppErrorBoundary } from "./components/common";
 import { LoginScreen } from "./components/workspaces";
@@ -30,9 +31,11 @@ function App() {
   }
 
   return (
-    <AppErrorBoundary>
-      <AuthenticatedApp onLogout={handleLogout} session={session} />
-    </AppErrorBoundary>
+    <ViewModeProvider>
+      <AppErrorBoundary>
+        <AuthenticatedApp onLogout={handleLogout} session={session} />
+      </AppErrorBoundary>
+    </ViewModeProvider>
   );
 }
 

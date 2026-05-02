@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   API_BASE_URL,
   applyRecommendation,
+  commitImportBatch,
   createRecommendation,
   downloadRecommendationReport,
   downloadReport,
@@ -12,6 +13,7 @@ import {
   getDashboardSummary,
   getDataQualitySummary,
   getHealthStatus,
+  getImportBatchReview,
   getInsightReadiness,
   getProductDuplicates,
   getProductIntelligence,
@@ -23,7 +25,10 @@ import {
   getWorkspaceSettings,
   mergeProducts,
   planScenarios,
+  previewSalesCsv,
+  rejectImportBatch,
   resetWorkspaceData,
+  rollbackImportBatch,
   setActiveImportBatch,
   simulatePrice,
   updateWorkspaceSettings,
@@ -112,6 +117,9 @@ export function AuthenticatedApp({ session, onLogout }) {
   const [dataQuality, setDataQuality] = useState(null);
   const [dataQualityState, setDataQualityState] = useState("idle");
   const [dataQualityMessage, setDataQualityMessage] = useState("");
+  const [importReview, setImportReview] = useState(null);
+  const [importReviewState, setImportReviewState] = useState("idle");
+  const [importReviewMessage, setImportReviewMessage] = useState("");
   const [productIntelligence, setProductIntelligence] = useState(null);
   const [productIntelligenceState, setProductIntelligenceState] = useState("idle");
   const [productIntelligenceMessage, setProductIntelligenceMessage] = useState("");
@@ -143,6 +151,7 @@ export function AuthenticatedApp({ session, onLogout }) {
 
   const activeItem = sidebarItems.find((item) => item.id === activePanel) || sidebarItems[0];
   const currency = settings.currency || "USD";
+  const canCommitImport = ["admin", "manager"].includes(session?.user?.role);
 
   async function refreshProducts() {
     const payload = await getProducts();
@@ -478,22 +487,98 @@ export function AuthenticatedApp({ session, onLogout }) {
 
     setUploadState("uploading");
     setUploadMessage("");
-    setUploadSummary(null);
 
     try {
+      const previewMatchesSelectedFile = uploadSummary?.status === "mapping_pending" && uploadSummary?.latestImportSource === selectedFile.name;
+
+      if (!previewMatchesSelectedFile) {
+        const preview = await previewSalesCsv(selectedFile);
+        setUploadState("success");
+        setUploadSummary({ ...preview.data, latestImportSource: selectedFile.name });
+        setImportReview(null);
+        setUploadMessage("Mapping preview ready. Confirm the detected columns, then stage the same file for quality review.");
+        return;
+      }
+
       const payload = await uploadSalesCsv(selectedFile);
-      await Promise.all([refreshProducts(), refreshDashboard(), refreshDataQuality(), refreshProductIntelligence(), refreshCustomerSegments(), refreshCompetitorMarket(), refreshSeasonality(), refreshRelationships(), refreshProductDuplicates()]);
-      await refreshReadiness();
+      const review = await getImportBatchReview(payload.data.importBatchId);
+      await refreshDataQuality();
       setUploadState("success");
       setUploadSummary(payload.data);
+      setImportReview(review.data);
+      setImportReviewState("success");
+      setImportReviewMessage("Quality review ready. Commit is required before dashboards or models change.");
       setUploadMessage(
-        `Imported ${payload.data.importedRows} sales rows across ${payload.data.productsDetected ?? 0} products. ${payload.data.duplicateRowsSkipped ?? 0} duplicate rows skipped.`
+        `Staged ${payload.data.processedRows} rows. ${payload.data.modelEligibleRows ?? 0} rows are safe for price modeling.`
       );
-      setSelectedFile(null);
-      form.reset();
     } catch (err) {
       setUploadState("error");
       setUploadMessage(err.message);
+    }
+  }
+
+  async function refreshWorkspaceAfterDatasetChange() {
+    await Promise.all([refreshProducts(), refreshDashboard(), refreshDataQuality(), refreshProductIntelligence(), refreshCustomerSegments(), refreshCompetitorMarket(), refreshSeasonality(), refreshRelationships(), refreshProductDuplicates(), refreshHistory()]);
+    await refreshReadiness();
+  }
+
+  async function handleCommitImport() {
+    const importBatchId = uploadSummary?.importBatchId || importReview?.importBatch?._id;
+    if (!importBatchId) return;
+
+    setImportReviewState("running");
+    setImportReviewMessage("");
+
+    try {
+      const payload = await commitImportBatch(importBatchId);
+      await refreshWorkspaceAfterDatasetChange();
+      setUploadSummary((current) => ({ ...(current || {}), ...payload.data, status: "committed", importedRows: payload.data.committedRows }));
+      setImportReviewState("success");
+      setImportReviewMessage(payload.data.message);
+      setUploadMessage(`Committed ${payload.data.committedRows} verified rows. Dashboard and models now use this dataset.`);
+      setSelectedFile(null);
+      setImportReview(null);
+    } catch (err) {
+      setImportReviewState("error");
+      setImportReviewMessage(err.message);
+    }
+  }
+
+  async function handleRejectImport() {
+    const importBatchId = uploadSummary?.importBatchId || importReview?.importBatch?._id;
+    if (!importBatchId) return;
+
+    setImportReviewState("running");
+    setImportReviewMessage("");
+
+    try {
+      const payload = await rejectImportBatch(importBatchId);
+      await refreshDataQuality();
+      setUploadSummary((current) => ({ ...(current || {}), status: "rejected" }));
+      setImportReview(null);
+      setImportReviewState("success");
+      setImportReviewMessage(payload.data.message);
+      setUploadMessage("Staged upload rejected. No active data changed.");
+    } catch (err) {
+      setImportReviewState("error");
+      setImportReviewMessage(err.message);
+    }
+  }
+
+  async function handleRollbackImport(importBatchId) {
+    if (!importBatchId) return;
+
+    setDataQualityState("loading");
+    setDataQualityMessage("Restoring archived dataset.");
+
+    try {
+      const payload = await rollbackImportBatch(importBatchId);
+      await refreshWorkspaceAfterDatasetChange();
+      setDataQualityState("success");
+      setDataQualityMessage(payload.data.message);
+    } catch (err) {
+      setDataQualityState("error");
+      setDataQualityMessage(err.message);
     }
   }
 
@@ -747,6 +832,12 @@ export function AuthenticatedApp({ session, onLogout }) {
         detail: `${activeSource.rows || 0} rows in active view`,
         warning: (dashboardData?.sources || []).length > 1
       }
+    : selectedFile
+    ? {
+        label: "File selected",
+        detail: `Ready to upload ${selectedFile.name}`,
+        warning: true
+      }
     : {
         label: "No active dataset",
         detail: totalSalesRecords ? `${totalSalesRecords} sales rows loaded` : "Upload CSV to begin",
@@ -802,6 +893,12 @@ export function AuthenticatedApp({ session, onLogout }) {
           status={status}
           totalFittedModels={totalFittedModels}
           totalSalesRecords={totalSalesRecords}
+          uploadSummary={uploadSummary}
+          importReview={importReview}
+          canCommitImport={canCommitImport}
+          handleCommitImport={handleCommitImport}
+          importReviewState={importReviewState}
+          importReviewMessage={importReviewMessage}
         />
       );
     }
@@ -815,8 +912,14 @@ export function AuthenticatedApp({ session, onLogout }) {
               label: "Sales Data",
               content: (
                 <SalesDataPanel
+                  canCommitImport={canCommitImport}
                   handleDownloadPanelReport={handleDownloadReport}
+                  handleCommitImport={handleCommitImport}
+                  handleRejectImport={handleRejectImport}
                   handleUpload={handleUpload}
+                  importReview={importReview}
+                  importReviewMessage={importReviewMessage}
+                  importReviewState={importReviewState}
                   selectedFile={selectedFile}
                   setSelectedFile={setSelectedFile}
                   uploadState={uploadState}
@@ -833,6 +936,7 @@ export function AuthenticatedApp({ session, onLogout }) {
                 <DataQualityPanel
                   currency={currency}
                   dataQuality={dataQuality}
+                  handleRollbackImport={handleRollbackImport}
                   handleSetActiveImportBatch={handleSetActiveImportBatch}
                   message={dataQualityMessage}
                   refreshDataQuality={refreshDataQuality}
@@ -1126,8 +1230,14 @@ export function AuthenticatedApp({ session, onLogout }) {
     if (activePanel === "sales") {
       return (
         <SalesDataPanel
+          canCommitImport={canCommitImport}
           handleDownloadPanelReport={handleDownloadReport}
+          handleCommitImport={handleCommitImport}
+          handleRejectImport={handleRejectImport}
           handleUpload={handleUpload}
+          importReview={importReview}
+          importReviewMessage={importReviewMessage}
+          importReviewState={importReviewState}
           selectedFile={selectedFile}
           setSelectedFile={setSelectedFile}
           uploadState={uploadState}
@@ -1143,6 +1253,7 @@ export function AuthenticatedApp({ session, onLogout }) {
         <DataQualityPanel
           currency={currency}
           dataQuality={dataQuality}
+          handleRollbackImport={handleRollbackImport}
           handleSetActiveImportBatch={handleSetActiveImportBatch}
           message={dataQualityMessage}
           refreshDataQuality={refreshDataQuality}

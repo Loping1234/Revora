@@ -203,6 +203,9 @@ export function summarizeBacktest(metrics = {}) {
     worstErrorPercent: round(worstError, 1),
     demandErrorPercent: round(metrics.demandMAPE, 1),
     revenueErrorPercent: round(metrics.revenueMAPE, 1),
-    profitErrorPercent: round(metrics.profitMAPE, 1)
+    profitErrorPercent: round(metrics.profitMAPE, 1),
+    baselineComparison: metrics.baselineComparison || null,
+    modelBeatsBaseline: metrics.baselineComparison?.modelBeatsBaseline ?? null,
+    baselineImprovementPercent: metrics.baselineComparison?.improvementPercent ?? null
   };
 }

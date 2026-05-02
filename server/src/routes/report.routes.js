@@ -26,7 +26,7 @@ function escapeCsv(value) {
 
 reportRouter.get("/recommendations.csv", async (req, res, next) => {
   try {
-    const recommendations = await Recommendation.find(workspaceFilter(req)).sort({ createdAt: -1 }).limit(500).populate("productId", "name sku category").lean();
+    const recommendations = await Recommendation.find(workspaceFilter(req, { datasetStatus: "active" })).sort({ createdAt: -1 }).limit(500).populate("productId", "name sku category").lean();
     const headers = [
       "Created At",
       "Product",

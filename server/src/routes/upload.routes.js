@@ -6,10 +6,15 @@ import { unlink } from "node:fs/promises";
 import mongoose from "mongoose";
 import multer from "multer";
 import os from "node:os";
+import { DemandModel } from "../models/demand-model.model.js";
 import { ImportBatch } from "../models/import-batch.model.js";
 import { ImportRowIssue } from "../models/import-row-issue.model.js";
 import { Product } from "../models/product.model.js";
+import { RecommendationOutcome } from "../models/recommendation-outcome.model.js";
+import { Recommendation } from "../models/recommendation.model.js";
 import { SalesData } from "../models/sales-data.model.js";
+import { SalesDataStaging } from "../models/sales-data-staging.model.js";
+import { requireAuth } from "../middleware/auth.middleware.js";
 import { logAudit } from "../services/audit.service.js";
 import { setLatestImportBatchActive } from "../services/import-batch.service.js";
 import { normalizeSegmentValue } from "../utils/segments.js";
@@ -29,6 +34,8 @@ const upload = multer({
 
 const MAX_UPLOAD_ROWS = 10000;
 const INSERT_BATCH_SIZE = 500;
+const STAGING_TTL_HOURS = 24;
+const ROLLBACK_WINDOW_DAYS = 7;
 
 export const uploadRouter = Router();
 
@@ -522,7 +529,616 @@ function buildRowFingerprint({ source, sku, productId, productName, date, price,
   return crypto.createHash("sha256").update(parts.join("|")).digest("hex");
 }
 
-uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
+function stagingExpiryDate() {
+  return new Date(Date.now() + STAGING_TTL_HOURS * 60 * 60 * 1000);
+}
+
+function getActor(req) {
+  return req.user ? { id: req.user.id, name: req.user.name, role: req.user.role } : undefined;
+}
+
+function setRowIssue(row, code, reason, status = "warning") {
+  row.issueCodes = [...new Set([...(row.issueCodes || []), code])];
+  row.issueReasons = [...new Set([...(row.issueReasons || []), reason])];
+
+  if (status === "error") {
+    row.rowStatus = "error";
+    row.excludedFromModel = true;
+    return;
+  }
+
+  if (row.rowStatus === "error") return;
+
+  if (status === "excluded_from_model") {
+    row.rowStatus = "excluded_from_model";
+    row.excludedFromModel = true;
+    return;
+  }
+
+  if (row.rowStatus !== "excluded_from_model") {
+    row.rowStatus = "warning";
+  }
+}
+
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function quantile(values, q) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const pos = (sorted.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  return sorted[base + 1] === undefined ? sorted[base] : sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+}
+
+function iqrBounds(values, multiplier = 1.5) {
+  const clean = values.filter(Number.isFinite);
+  if (clean.length < 4) return null;
+  const q1 = quantile(clean, 0.25);
+  const q3 = quantile(clean, 0.75);
+  const iqr = q3 - q1;
+  if (iqr <= 0) return null;
+  return {
+    low: q1 - multiplier * iqr,
+    high: q3 + multiplier * iqr,
+    median: median(clean)
+  };
+}
+
+function detectCurrencyHints(headers) {
+  const hints = new Set();
+  headers.forEach((header) => {
+    const text = String(header || "").toLowerCase();
+    if (text.includes("inr") || text.includes("₹") || text.includes("rs")) hints.add("INR");
+    if (text.includes("usd") || text.includes("$")) hints.add("USD");
+    if (text.includes("eur") || text.includes("€")) hints.add("EUR");
+    if (text.includes("gbp") || text.includes("£")) hints.add("GBP");
+  });
+  return [...hints];
+}
+
+function buildStagedProductIdentity({ productId, sku, productName, category }) {
+  const externalProductId = getExternalProductId(productId);
+  const identity = String(sku || externalProductId || productName || category || "").trim();
+  const productLabel = String(productName || (externalProductId ? `Product ${externalProductId}` : "") || category || sku || "").trim();
+
+  if (!identity && !productLabel) {
+    throw new Error("missing product identity");
+  }
+
+  const generatedSku = createSku(sku || (externalProductId ? `PID-${externalProductId}` : productLabel || identity));
+  const productIdentityKey = normalizeProductKey(sku || externalProductId || `${productLabel}|${category}`);
+
+  return {
+    externalProductId,
+    productIdentityKey,
+    productSnapshot: {
+      externalProductId,
+      sku: generatedSku,
+      name: productLabel || generatedSku,
+      category: String(category || productLabel || "Uncategorized").trim()
+    }
+  };
+}
+
+export function buildQualitySummary(rows, mapping, totalRows, truncated, datasetWarnings = []) {
+  const counts = rows.reduce(
+    (summary, row) => {
+      summary[row.rowStatus] = (summary[row.rowStatus] || 0) + 1;
+      if (row.excludedFromModel) summary.excludedFromModel += 1;
+      if (row.rowStatus !== "error") {
+        summary.commitEligibleRows += 1;
+        if (!row.excludedFromModel) summary.modelEligibleRows += 1;
+      }
+      if (row.cost !== undefined && row.cost !== null) summary.costRows += 1;
+      if (row.competitorPrice !== undefined && row.competitorPrice !== null) summary.competitorRows += 1;
+      if (row.stockoutFlag) summary.stockoutRows += 1;
+      if (row.promotion) summary.promotionRows += 1;
+      return summary;
+    },
+    {
+      accepted: 0,
+      warning: 0,
+      excluded_from_model: 0,
+      error: 0,
+      excludedFromModel: 0,
+      commitEligibleRows: 0,
+      modelEligibleRows: 0,
+      costRows: 0,
+      competitorRows: 0,
+      stockoutRows: 0,
+      promotionRows: 0
+    }
+  );
+  const validRows = rows.filter((row) => row.rowStatus !== "error");
+  const productKeys = new Set(validRows.map((row) => row.productIdentityKey).filter(Boolean));
+  const segmentCounts = validRows.reduce((countsBySegment, row) => {
+    const label = row.customerSegmentLabel || "Retail";
+    countsBySegment[label] = (countsBySegment[label] || 0) + 1;
+    return countsBySegment;
+  }, {});
+  const dates = validRows.map((row) => row.date).filter(Boolean).sort((a, b) => new Date(a) - new Date(b));
+  const readinessByProduct = validRows.reduce((summary, row) => {
+    const key = row.productIdentityKey;
+    if (!key) return summary;
+    const product = summary.get(key) || { rows: 0, modelRows: 0, prices: new Set() };
+    product.rows += 1;
+    if (!row.excludedFromModel) {
+      product.modelRows += 1;
+      product.prices.add(Number(row.price).toFixed(4));
+    }
+    summary.set(key, product);
+    return summary;
+  }, new Map());
+  const readinessCounts = [...readinessByProduct.values()].reduce(
+    (countsByReadiness, product) => {
+      if (product.modelRows >= 8 && product.prices.size >= 3) countsByReadiness.ready += 1;
+      else if (product.modelRows >= 3 && product.prices.size >= 2) countsByReadiness.limited += 1;
+      else countsByReadiness.notReady += 1;
+      return countsByReadiness;
+    },
+    { ready: 0, limited: 0, notReady: 0 }
+  );
+  const dataFitnessScore = validRows.length
+    ? Math.max(0, Math.min(100, Math.round(
+      (readinessCounts.ready * 100 + readinessCounts.limited * 65 + readinessCounts.notReady * 25) /
+      Math.max(1, readinessCounts.ready + readinessCounts.limited + readinessCounts.notReady) -
+      (counts.costRows ? 0 : 20) -
+      (counts.excludedFromModel > validRows.length * 0.2 ? 15 : 0)
+    )))
+    : 0;
+
+  return {
+    totalRows,
+    processedRows: rows.length,
+    truncated,
+    ...counts,
+    productsDetected: productKeys.size,
+    segmentsDetected: segmentCounts,
+    detectedColumns: mapping.detectedColumns,
+    mappedFields: mapping.mappedFields,
+    dateRange: {
+      start: dates[0] || null,
+      end: dates[dates.length - 1] || null
+    },
+    costCoveragePercent: validRows.length ? Number((counts.costRows / validRows.length * 100).toFixed(1)) : 0,
+    competitorCoveragePercent: validRows.length ? Number((counts.competitorRows / validRows.length * 100).toFixed(1)) : 0,
+    productsReady: readinessCounts.ready,
+    productsLimited: readinessCounts.limited,
+    productsNotReady: readinessCounts.notReady,
+    dataFitnessScore,
+    dataFitnessLabel: dataFitnessScore >= 75 ? "Model usable" : dataFitnessScore >= 50 ? "Model risky" : validRows.length ? "Recommendation blocked" : "Summary only",
+    datasetWarnings
+  };
+}
+
+export function applyMisleadingDataChecks(rows, headers) {
+  const validRows = rows.filter((row) => row.rowStatus !== "error");
+  const datasetWarnings = [];
+  const currencyHints = detectCurrencyHints(headers);
+
+  if (currencyHints.length > 1) {
+    datasetWarnings.push(`Multiple currency hints detected (${currencyHints.join(", ")}). Confirm values use one unit before committing.`);
+  }
+
+  const byProduct = validRows.reduce((groups, row) => {
+    const key = row.productIdentityKey || "unknown";
+    const list = groups.get(key) || [];
+    list.push(row);
+    groups.set(key, list);
+    return groups;
+  }, new Map());
+
+  byProduct.forEach((productRows) => {
+    const priceBounds = iqrBounds(productRows.map((row) => Number(row.price)));
+    const quantityBounds = iqrBounds(productRows.map((row) => Number(row.quantity)));
+    const quantityMedian = median(productRows.map((row) => Number(row.quantity)));
+
+    productRows.forEach((row) => {
+      if (priceBounds && (row.price < Math.max(0, priceBounds.low) || row.price > priceBounds.high)) {
+        setRowIssue(row, "PRICE_OUTLIER", "Unit price is far outside the normal range for this product.", "warning");
+      }
+
+      if (quantityBounds && (row.quantity < Math.max(0, quantityBounds.low) || row.quantity > quantityBounds.high)) {
+        setRowIssue(row, "QUANTITY_OUTLIER", "Quantity is far outside the normal range for this product.", "warning");
+      }
+
+      if (quantityMedian > 0 && row.quantity >= quantityMedian * 10 && row.quantity >= 50) {
+        setRowIssue(row, "EXTREME_BULK_ROW", "Large bulk-like row excluded from price-response modeling.", "excluded_from_model");
+      }
+    });
+  });
+
+  const dates = validRows.map((row) => row.date?.getTime?.() || new Date(row.date).getTime()).filter(Number.isFinite);
+  const dateBounds = iqrBounds(dates, 3);
+  const tomorrow = Date.now() + 24 * 60 * 60 * 1000;
+
+  validRows.forEach((row) => {
+    const dateValue = row.date?.getTime?.() || new Date(row.date).getTime();
+
+    if (Number.isFinite(dateValue) && dateValue > tomorrow) {
+      setRowIssue(row, "FUTURE_DATE", "Sale date is in the future and cannot be committed as historical sales.", "error");
+    } else if (dateBounds && (dateValue < dateBounds.low || dateValue > dateBounds.high)) {
+      setRowIssue(row, "DATE_OUTLIER", "Sale date is far outside the batch's main date range.", "excluded_from_model");
+    }
+
+    if (Number.isFinite(row.cost) && row.price < row.cost) {
+      setRowIssue(row, "PRICE_BELOW_COST", "Price is below cost; row is excluded from profit-sensitive modeling.", "excluded_from_model");
+    }
+
+    if (Number.isFinite(row.revenue)) {
+      const expectedRevenue = row.price * row.quantity;
+      const tolerance = Math.max(Math.abs(row.revenue) * 0.05, 1);
+      if (Math.abs(row.revenue - expectedRevenue) > tolerance) {
+        setRowIssue(row, "REVENUE_MISMATCH", "Revenue does not match price x quantity within tolerance.", "warning");
+      }
+    }
+
+    if (row.customerSegment === "b2b" && byProduct.get(row.productIdentityKey)?.length > 1 && row.quantity >= Math.max(50, quantityMedianForProduct(byProduct.get(row.productIdentityKey)) * 5)) {
+      setRowIssue(row, "SEGMENT_BULK_MIX", "B2B-like bulk row is excluded from normal customer price modeling.", "excluded_from_model");
+    }
+  });
+
+  return datasetWarnings;
+}
+
+function quantityMedianForProduct(rows = []) {
+  return median(rows.map((row) => Number(row.quantity)));
+}
+
+async function parseRowsForStaging({ req, importBatch, headers, rowsToProcess, mapping, source, totalRows, truncated }) {
+  const rows = [];
+  const conflicts = {};
+  const seenFingerprints = new Set();
+
+  for (let index = 0; index < rowsToProcess.length; index += 1) {
+    const rowNumber = index + 2;
+    const rowValues = rowsToProcess[index];
+    const rawRow = buildRawRow(headers, rowValues);
+    const baseRow = {
+      workspaceId: getWorkspaceId(req),
+      importBatchId: importBatch._id,
+      source,
+      rowNumber,
+      rowStatus: "accepted",
+      excludedFromModel: false,
+      issueCodes: [],
+      issueReasons: [],
+      rawRow,
+      expiresAt: importBatch.expiresAt
+    };
+
+    try {
+      const quantityField = readNumberField(rowValues, mapping.fields.quantity, "quantity", conflicts);
+
+      if (quantityField.conflict && quantityField.value === undefined) throw new Error("conflicting quantity values");
+      if (!Number.isFinite(quantityField.parsed)) throw new Error("missing or invalid quantity");
+      if (quantityField.parsed < 0) throw new Error("quantity cannot be negative");
+
+      const revenueField = readNumberField(rowValues, mapping.fields.revenue, "revenue", conflicts);
+      const priceField = readNumberField(rowValues, mapping.fields.price, "price", conflicts);
+      let price = priceField.parsed;
+
+      if (!Number.isFinite(price) && Number.isFinite(revenueField.parsed) && quantityField.parsed > 0 && revenueField.parsed > 0) {
+        price = revenueField.parsed / quantityField.parsed;
+      }
+
+      if (!Number.isFinite(price)) throw new Error("missing or invalid price");
+      if (price <= 0) throw new Error("price must be greater than zero");
+
+      const costField = readNumberField(rowValues, mapping.fields.cost, "cost", conflicts);
+      const competitorPriceField = readNumberField(rowValues, mapping.fields.competitorPrice, "competitorPrice", conflicts);
+      const inventoryField = readNumberField(rowValues, mapping.fields.inventory, "inventory", conflicts);
+      const grossMarginField = readNumberField(rowValues, mapping.fields.grossMargin, "grossMargin", conflicts);
+      const discountField = readNumberField(rowValues, mapping.fields.discount, "discount", conflicts);
+      const marketingSpendField = readNumberField(rowValues, mapping.fields.marketingSpend, "marketingSpend", conflicts);
+      const dateField = readField(rowValues, mapping.fields.date, "date", conflicts);
+      const segmentField = readField(rowValues, mapping.fields.customerSegment, "customerSegment", conflicts);
+      const skuField = readField(rowValues, mapping.fields.sku, "sku", conflicts);
+      const productIdField = readField(rowValues, mapping.fields.productId, "productId", conflicts);
+      const productNameField = readField(rowValues, mapping.fields.productName, "productName", conflicts);
+      const categoryField = readField(rowValues, mapping.fields.category, "category", conflicts);
+      const regionField = readField(rowValues, mapping.fields.region, "region", conflicts);
+      const channelField = readField(rowValues, mapping.fields.channel, "channel", conflicts);
+      const promotionField = readField(rowValues, mapping.fields.promotion, "promotion", conflicts);
+      const holidayField = readField(rowValues, mapping.fields.holiday, "holiday", conflicts);
+      const stockoutField = readField(rowValues, mapping.fields.stockoutFlag, "stockoutFlag", conflicts);
+
+      for (const optionalField of [costField, competitorPriceField, inventoryField, grossMarginField, discountField, marketingSpendField]) {
+        if (!isBlank(optionalField.value) && !Number.isFinite(optionalField.parsed)) {
+          throw new Error(`invalid ${optionalField.fieldName || "numeric"} value`);
+        }
+      }
+
+      const date = parseDateValue(dateField.value, rowNumber);
+      const customerSegment = normalizeSegmentValue(segmentField.value);
+      const identity = buildStagedProductIdentity({
+        productId: productIdField.value,
+        sku: skuField.value,
+        productName: productNameField.value,
+        category: categoryField.value
+      });
+      const baseFingerprint = buildRowFingerprint({
+        source,
+        sku: identity.productSnapshot.sku,
+        productId: productIdField.value,
+        productName: identity.productSnapshot.name,
+        date,
+        price,
+        quantity: quantityField.parsed,
+        segment: customerSegment.key
+      });
+
+      if (seenFingerprints.has(baseFingerprint)) {
+        throw new Error("duplicate row inside this upload");
+      }
+      seenFingerprints.add(baseFingerprint);
+
+      const row = {
+        ...baseRow,
+        ...identity,
+        price,
+        quantity: quantityField.parsed,
+        competitorPrice: Number.isFinite(competitorPriceField.parsed) ? competitorPriceField.parsed : undefined,
+        cost: Number.isFinite(costField.parsed) ? costField.parsed : undefined,
+        inventory: Number.isFinite(inventoryField.parsed) ? inventoryField.parsed : undefined,
+        revenue: Number.isFinite(revenueField.parsed) ? revenueField.parsed : price * quantityField.parsed,
+        grossMargin: Number.isFinite(grossMarginField.parsed) ? grossMarginField.parsed : undefined,
+        region: isBlank(regionField.value) ? undefined : String(regionField.value).trim(),
+        channel: isBlank(channelField.value) ? undefined : String(channelField.value).trim(),
+        promotion: parseBooleanValue(promotionField.value) || Number(discountField.parsed || 0) > 0,
+        discount: Number.isFinite(discountField.parsed) ? discountField.parsed : undefined,
+        holiday: parseBooleanValue(holidayField.value),
+        marketingSpend: Number.isFinite(marketingSpendField.parsed) ? marketingSpendField.parsed : undefined,
+        stockoutFlag: parseBooleanValue(stockoutField.value) || inventoryField.parsed === 0,
+        dateParts: buildDateParts(date),
+        customerSegment: customerSegment.key,
+        customerSegmentLabel: customerSegment.label,
+        date,
+        rowFingerprint: `${baseFingerprint}:${importBatch._id}`
+      };
+
+      if (row.stockoutFlag) {
+        setRowIssue(row, "STOCKOUT", "Stockout row will be excluded from demand modeling.", "excluded_from_model");
+      }
+
+      rows.push(row);
+    } catch (error) {
+      const row = {
+        ...baseRow,
+        rowStatus: "error",
+        excludedFromModel: true,
+        issueCodes: ["STRUCTURAL_ERROR"],
+        issueReasons: [error.message.replace(`Row ${rowNumber}: `, "")]
+      };
+      rows.push(row);
+    }
+  }
+
+  const datasetWarnings = applyMisleadingDataChecks(rows, headers);
+  const qualitySummary = buildQualitySummary(rows, mapping, totalRows, truncated, datasetWarnings);
+
+  return { rows, conflicts, qualitySummary };
+}
+
+async function insertStagingRows(rows) {
+  for (let index = 0; index < rows.length; index += INSERT_BATCH_SIZE) {
+    await SalesDataStaging.insertMany(rows.slice(index, index + INSERT_BATCH_SIZE), { ordered: false });
+  }
+}
+
+async function createProductMapForCommit(req, stagedRows, importBatchId) {
+  const workspaceId = getWorkspaceId(req);
+  const groups = stagedRows.reduce((map, row) => {
+    const key = row.productIdentityKey;
+    const current = map.get(key) || [];
+    current.push(row);
+    map.set(key, current);
+    return map;
+  }, new Map());
+  const productMap = new Map();
+
+  for (const [key, rows] of groups.entries()) {
+    const first = rows[0];
+    const costValues = rows.map((row) => Number(row.cost)).filter((value) => Number.isFinite(value) && value >= 0);
+    const inventoryValues = rows.map((row) => Number(row.inventory)).filter((value) => Number.isFinite(value) && value >= 0);
+    const priceValues = rows.map((row) => Number(row.price)).filter((value) => Number.isFinite(value) && value >= 0);
+    const averagePrice = priceValues.length ? priceValues.reduce((total, value) => total + value, 0) / priceValues.length : 0;
+    const cost = costValues.length ? median(costValues) : Number((averagePrice * 0.6).toFixed(2));
+    const sku = createSku(first.productSnapshot?.sku || first.externalProductId || first.productSnapshot?.name || key);
+    const product = await Product.findOneAndUpdate(
+      { sku },
+      {
+        $set: {
+          workspaceId,
+          datasetStatus: "active",
+          archivedAt: null,
+          archiveReason: "",
+          sourceImportBatchId: importBatchId,
+          name: first.productSnapshot?.name || sku,
+          sku,
+          category: first.productSnapshot?.category || "Uncategorized",
+          basePrice: Number(averagePrice.toFixed(2)),
+          cost,
+          inventory: inventoryValues.length ? Math.max(...inventoryValues) : 100,
+          normalizedSku: normalizeProductKey(sku),
+          normalizedName: normalizeProductKey(first.productSnapshot?.name || sku),
+          externalProductIds: first.externalProductId ? [first.externalProductId] : [],
+          aliases: [...new Set(rows.flatMap((row) => [row.productSnapshot?.name, row.productSnapshot?.sku, row.externalProductId]).filter(Boolean).map(String))],
+          costQuality: costValues.length ? "real" : "estimated",
+          matchConfidence: 0.9
+        }
+      },
+      { new: true, upsert: true, runValidators: true }
+    );
+    productMap.set(key, product);
+  }
+
+  return productMap;
+}
+
+function stagingRowToSalesData(req, row, product, sourceImportBatchId) {
+  return {
+    workspaceId: getWorkspaceId(req),
+    datasetStatus: "active",
+    sourceImportBatchId,
+    excludedFromModel: row.excludedFromModel,
+    productId: product._id,
+    price: row.price,
+    quantity: row.quantity,
+    competitorPrice: row.competitorPrice,
+    cost: row.cost,
+    inventory: row.inventory,
+    revenue: row.revenue,
+    grossMargin: row.grossMargin,
+    region: row.region,
+    channel: row.channel,
+    promotion: row.promotion,
+    discount: row.discount,
+    holiday: row.holiday,
+    marketingSpend: row.marketingSpend,
+    stockoutFlag: row.stockoutFlag,
+    dateParts: row.dateParts,
+    externalProductId: row.externalProductId,
+    customerSegment: row.customerSegment,
+    customerSegmentLabel: row.customerSegmentLabel,
+    productSnapshot: row.productSnapshot,
+    date: row.date,
+    rowFingerprint: row.rowFingerprint,
+    importBatchId: sourceImportBatchId,
+    importMeta: {
+      source: row.source,
+      rowNumber: row.rowNumber
+    }
+  };
+}
+
+async function archiveActiveDataset(req, reason, replacementBatchId) {
+  const workspaceId = getWorkspaceId(req);
+  const now = new Date();
+  const activeFilter = { workspaceId, datasetStatus: { $ne: "archived" } };
+  const archiveUpdate = {
+    $set: {
+      datasetStatus: "archived",
+      archivedAt: now,
+      archiveReason: reason
+    }
+  };
+  const currentActiveBatch = await ImportBatch.findOne({ workspaceId, status: "committed" }).sort({ committedAt: -1 }).lean();
+  const [salesRows, products, models, recommendations, outcomes] = await Promise.all([
+    SalesData.updateMany(activeFilter, archiveUpdate),
+    Product.updateMany(activeFilter, archiveUpdate),
+    DemandModel.updateMany(activeFilter, archiveUpdate),
+    Recommendation.updateMany(activeFilter, archiveUpdate),
+    RecommendationOutcome.updateMany(activeFilter, archiveUpdate)
+  ]);
+
+  if (currentActiveBatch) {
+    await ImportBatch.updateOne(
+      { _id: currentActiveBatch._id },
+      {
+        $set: {
+          status: "archived",
+          archivedAt: now,
+          replacedImportBatchId: replacementBatchId
+        }
+      }
+    );
+  }
+
+  return {
+    previousImportBatchId: currentActiveBatch?._id || null,
+    archived: {
+      salesRows: salesRows.modifiedCount || 0,
+      products: products.modifiedCount || 0,
+      pricingInsights: models.modifiedCount || 0,
+      recommendations: recommendations.modifiedCount || 0,
+      recommendationOutcomes: outcomes.modifiedCount || 0
+    }
+  };
+}
+
+function ensureBatchIsReviewable(batch) {
+  if (!batch) {
+    const error = new Error("Import batch not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (["rejected", "abandoned", "failed"].includes(batch.status)) {
+    const error = new Error(`Import batch is ${batch.status} and cannot be committed.`);
+    error.statusCode = 409;
+    throw error;
+  }
+}
+
+async function buildReviewPayload(req, batchId) {
+  const batch = await ImportBatch.findOne({ _id: batchId, workspaceId: getWorkspaceId(req) }).lean();
+  ensureBatchIsReviewable(batch);
+  const [statusCounts, sampleIssues, productCount, modelEligibleRows] = await Promise.all([
+    SalesDataStaging.aggregate([
+      { $match: { workspaceId: getWorkspaceId(req), importBatchId: new mongoose.Types.ObjectId(batchId) } },
+      {
+        $group: {
+          _id: "$rowStatus",
+          rows: { $sum: 1 },
+          excludedFromModel: { $sum: { $cond: [{ $eq: ["$excludedFromModel", true] }, 1, 0] } }
+        }
+      }
+    ]),
+    SalesDataStaging.find({
+      workspaceId: getWorkspaceId(req),
+      importBatchId: batchId,
+      rowStatus: { $ne: "accepted" }
+    }).sort({ rowNumber: 1 }).limit(25).lean(),
+    SalesDataStaging.distinct("productIdentityKey", {
+      workspaceId: getWorkspaceId(req),
+      importBatchId: batchId,
+      rowStatus: { $ne: "error" }
+    }),
+    SalesDataStaging.countDocuments({
+      workspaceId: getWorkspaceId(req),
+      importBatchId: batchId,
+      rowStatus: { $ne: "error" },
+      excludedFromModel: { $ne: true }
+    })
+  ]);
+
+  const counts = statusCounts.reduce((summary, item) => {
+    summary[item._id] = item.rows;
+    summary.excludedFromModel += item.excludedFromModel || 0;
+    return summary;
+  }, { accepted: 0, warning: 0, excluded_from_model: 0, error: 0, excludedFromModel: 0 });
+
+  return {
+    importBatch: batch,
+    qualitySummary: {
+      ...(batch.qualitySummary || {}),
+      ...counts,
+      productsDetected: productCount.length,
+      modelEligibleRows,
+      commitEligibleRows: (counts.accepted || 0) + (counts.warning || 0) + (counts.excluded_from_model || 0)
+    },
+    sampleIssues: sampleIssues.map((row) => ({
+      rowNumber: row.rowNumber,
+      rowStatus: row.rowStatus,
+      issueCodes: row.issueCodes,
+      issueReasons: row.issueReasons,
+      product: row.productSnapshot,
+      price: row.price,
+      quantity: row.quantity,
+      revenue: row.revenue,
+      segment: row.customerSegmentLabel
+    }))
+  };
+}
+
+async function handlePreview(req, res, next) {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -531,12 +1147,7 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
       });
     }
 
-    const {
-      headers,
-      rowsToProcess,
-      totalRows,
-      truncated
-    } = await readCsvPreview(req.file.path);
+    const { headers, rowsToProcess, totalRows, truncated } = await readCsvPreview(req.file.path);
 
     if (!headers || totalRows < 1) {
       return res.status(400).json({
@@ -546,444 +1157,359 @@ uploadRouter.post("/sales", upload.single("file"), async (req, res, next) => {
     }
 
     const mapping = buildColumnMapping(headers);
-    const products = await Product.find(workspaceFilter(req)).lean();
-    const productIndexes = buildProductIndexes(products);
-    productIndexes.workspaceId = getWorkspaceId(req);
-    const records = [];
-    const errors = [];
-    const rowIssues = [];
-    const conflicts = {};
-    const source = req.file.originalname;
+    const requiredMissing = ["price", "quantity"].filter((field) => !mapping.mappedFields[field] && !(field === "price" && mapping.mappedFields.revenue && mapping.mappedFields.quantity));
     const importBatch = await ImportBatch.create({
       workspaceId: getWorkspaceId(req),
-      source,
+      source: req.file.originalname,
       detectedColumns: mapping.detectedColumns,
       mappedFields: mapping.mappedFields,
-      status: "processing",
+      status: "mapping_pending",
+      rowCounts: {
+        totalRows,
+        processedRows: Math.min(rowsToProcess.length, 10)
+      },
+      truncated,
+      expiresAt: stagingExpiryDate()
+    });
+    await logAudit(req, {
+      action: "upload.preview_created",
+      targetType: "ImportBatch",
+      targetId: importBatch._id,
+      summary: `Previewed sales CSV ${req.file.originalname}`,
+      metadata: { totalRows, mappedFields: mapping.mappedFields }
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        importBatchId: importBatch._id,
+        status: importBatch.status,
+        expiresAt: importBatch.expiresAt,
+        totalRows,
+        processedRows: rowsToProcess.length,
+        truncated,
+        detectedColumns: mapping.detectedColumns,
+        mappedFields: mapping.mappedFields,
+        mappingPreview: Object.entries(mapping.mappedFields).map(([field, column]) => ({ column, field, confidence: "auto-detected" })),
+        requiredMissing,
+        sampleRows: rowsToProcess.slice(0, 5).map((row, index) => ({
+          rowNumber: index + 2,
+          rawRow: buildRawRow(headers, row)
+        })),
+        message: "Mapping preview created. Confirm mapping and stage the file before it can affect dashboards or models."
+      }
+    });
+  } catch (error) {
+    next(error);
+  } finally {
+    if (req.file?.path) unlink(req.file.path).catch(() => {});
+  }
+}
+
+async function handleStage(req, res, next) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: { message: "CSV file is required in form field 'file'", statusCode: 400 }
+      });
+    }
+
+    const { headers, rowsToProcess, totalRows, truncated } = await readCsvPreview(req.file.path);
+
+    if (!headers || totalRows < 1) {
+      return res.status(400).json({
+        success: false,
+        error: { message: "CSV must contain a header row and at least one data row", statusCode: 400 }
+      });
+    }
+
+    const mapping = buildColumnMapping(headers);
+    const importBatch = await ImportBatch.create({
+      workspaceId: getWorkspaceId(req),
+      source: req.file.originalname,
+      detectedColumns: mapping.detectedColumns,
+      mappedFields: mapping.mappedFields,
+      status: "quality_review",
       rowCounts: {
         totalRows,
         processedRows: rowsToProcess.length
       },
+      truncated,
+      expiresAt: stagingExpiryDate()
+    });
+    const { rows, conflicts, qualitySummary } = await parseRowsForStaging({
+      req,
+      importBatch,
+      headers,
+      rowsToProcess,
+      mapping,
+      source: req.file.originalname,
+      totalRows,
       truncated
     });
-    const existingSourceRows = await SalesData.find({
-      workspaceId: getWorkspaceId(req),
-      "importMeta.source": source,
-      "importMeta.rowNumber": { $gte: 2, $lte: rowsToProcess.length + 1 }
-    })
-      .select("importMeta.rowNumber rawRow rowFingerprint")
-      .lean();
-    const existingRowsByRowNumber = existingSourceRows.reduce((rowsByNumber, record) => {
-      const rowNumber = record.importMeta?.rowNumber;
-      if (!Number.isFinite(rowNumber)) return rowsByNumber;
+    const rowIssues = rows
+      .filter((row) => row.issueReasons?.length)
+      .slice(0, 500)
+      .map((row) => ({
+        workspaceId: getWorkspaceId(req),
+        importBatchId: importBatch._id,
+        source: req.file.originalname,
+        rowNumber: row.rowNumber,
+        severity: row.rowStatus === "error" ? "error" : "warning",
+        reason: row.issueReasons.join("; "),
+        rawRow: row.rawRow
+      }));
 
-      const rows = rowsByNumber.get(rowNumber) || [];
-      rows.push(record);
-      rowsByNumber.set(rowNumber, rows);
-      return rowsByNumber;
-    }, new Map());
-    const seenFingerprints = new Set();
-    const detectedProductKeys = new Set();
-    const createdProductKeys = new Set();
-    const matchedProductKeys = new Set();
-    const externalProductIds = new Set();
-    const segmentCounts = {};
-    const detectedOptionalFields = Object.fromEntries(
-      ["region", "channel", "promotion", "discount", "holiday", "marketingSpend", "stockoutFlag"].filter((field) => mapping.mappedFields[field]).map((field) => [field, mapping.mappedFields[field]])
-    );
-    const datasetWarnings = [];
-    let duplicateRowsSkipped = 0;
-    let stockoutRowsDetected = 0;
-    let promotionRowsDetected = 0;
-    let costRowsDetected = 0;
-    let zeroQuantityRowsDetected = 0;
-    let belowCostRowsDetected = 0;
+    await insertStagingRows(rows);
+    if (rowIssues.length) await ImportRowIssue.insertMany(rowIssues, { ordered: false });
 
-    for (let index = 0; index < rowsToProcess.length; index += 1) {
-      const rowNumber = index + 2;
-      const rowValues = rowsToProcess[index];
-      const rawRow = buildRawRow(headers, rowValues);
-
-      try {
-        const quantityField = readNumberField(rowValues, mapping.fields.quantity, "quantity", conflicts);
-
-        if (quantityField.conflict && quantityField.value === undefined) {
-          throw new Error("conflicting quantity values");
-        }
-
-        if (!Number.isFinite(quantityField.parsed)) {
-          throw new Error("missing or invalid quantity");
-        }
-
-        if (quantityField.parsed < 0) {
-          throw new Error("quantity cannot be negative");
-        }
-
-        const revenueField = readNumberField(rowValues, mapping.fields.revenue, "revenue", conflicts);
-        const priceField = readNumberField(rowValues, mapping.fields.price, "price", conflicts);
-        let price = priceField.parsed;
-
-        if (!Number.isFinite(price) && Number.isFinite(revenueField.parsed) && quantityField.parsed > 0 && revenueField.parsed > 0) {
-          price = revenueField.parsed / quantityField.parsed;
-        }
-
-        if (!Number.isFinite(price)) {
-          if (priceField.conflict && priceField.value === undefined) {
-            throw new Error("conflicting price values");
-          }
-
-          if (revenueField.conflict && revenueField.value === undefined) {
-            throw new Error("conflicting revenue values");
-          }
-
-          throw new Error("missing or invalid price");
-        }
-
-        if (price <= 0) {
-          throw new Error("price must be greater than zero");
-        }
-
-        if (Number.isFinite(revenueField.parsed)) {
-          const expectedRevenue = price * quantityField.parsed;
-          const tolerance = Math.max(Math.abs(revenueField.parsed) * 0.05, 1);
-
-          if (Math.abs(revenueField.parsed - expectedRevenue) > tolerance) {
-            incrementConflict(conflicts, "revenue");
-          }
-        }
-
-        const costField = readNumberField(rowValues, mapping.fields.cost, "cost", conflicts);
-        const competitorPriceField = readNumberField(rowValues, mapping.fields.competitorPrice, "competitorPrice", conflicts);
-        const inventoryField = readNumberField(rowValues, mapping.fields.inventory, "inventory", conflicts);
-        const grossMarginField = readNumberField(rowValues, mapping.fields.grossMargin, "grossMargin", conflicts);
-        const discountField = readNumberField(rowValues, mapping.fields.discount, "discount", conflicts);
-        const marketingSpendField = readNumberField(rowValues, mapping.fields.marketingSpend, "marketingSpend", conflicts);
-        const dateField = readField(rowValues, mapping.fields.date, "date", conflicts);
-        const segmentField = readField(rowValues, mapping.fields.customerSegment, "customerSegment", conflicts);
-        const skuField = readField(rowValues, mapping.fields.sku, "sku", conflicts);
-        const productIdField = readField(rowValues, mapping.fields.productId, "productId", conflicts);
-        const productNameField = readField(rowValues, mapping.fields.productName, "productName", conflicts);
-        const categoryField = readField(rowValues, mapping.fields.category, "category", conflicts);
-        const regionField = readField(rowValues, mapping.fields.region, "region", conflicts);
-        const channelField = readField(rowValues, mapping.fields.channel, "channel", conflicts);
-        const promotionField = readField(rowValues, mapping.fields.promotion, "promotion", conflicts);
-        const holidayField = readField(rowValues, mapping.fields.holiday, "holiday", conflicts);
-        const stockoutField = readField(rowValues, mapping.fields.stockoutFlag, "stockoutFlag", conflicts);
-
-        for (const optionalField of [costField, competitorPriceField, inventoryField, grossMarginField, discountField, marketingSpendField]) {
-          if (!isBlank(optionalField.value) && !Number.isFinite(optionalField.parsed)) {
-            throw new Error(`invalid ${optionalField.fieldName || "numeric"} value`);
-          }
-        }
-
-        const date = parseDateValue(dateField.value, rowNumber);
-        const dateParts = buildDateParts(date);
-        const customerSegment = normalizeSegmentValue(segmentField.value);
-        const externalProductId = getExternalProductId(productIdField.value);
-        const isPromotion = parseBooleanValue(promotionField.value) || Number(discountField.parsed || 0) > 0;
-        const isHoliday = parseBooleanValue(holidayField.value);
-        const isStockout = parseBooleanValue(stockoutField.value) || inventoryField.parsed === 0;
-
-        if (isPromotion) promotionRowsDetected += 1;
-        if (isStockout) stockoutRowsDetected += 1;
-        if (Number.isFinite(costField.parsed)) costRowsDetected += 1;
-        if (quantityField.parsed === 0) zeroQuantityRowsDetected += 1;
-        if (Number.isFinite(costField.parsed) && price < costField.parsed) belowCostRowsDetected += 1;
-
-        const rowFingerprint = buildRowFingerprint({
-          source,
-          sku: skuField.value,
-          productId: productIdField.value,
-          productName: productNameField.value,
-          date,
-          price,
-          quantity: quantityField.parsed,
-          segment: customerSegment.key
-        });
-        const existingSameSourceRows = existingRowsByRowNumber.get(rowNumber) || [];
-        const isExistingSameSourceDuplicate = existingSameSourceRows.some(
-          (record) => record.rowFingerprint === rowFingerprint || (!record.rowFingerprint && rawRowsMatch(record.rawRow, rawRow))
-        );
-
-        if (isExistingSameSourceDuplicate) {
-          duplicateRowsSkipped += 1;
-          continue;
-        }
-
-        if (seenFingerprints.has(rowFingerprint)) {
-          duplicateRowsSkipped += 1;
-          continue;
-        }
-
-        seenFingerprints.add(rowFingerprint);
-
-        const resolvedProduct = await resolveProduct({
-          productId: productIdField.value,
-          sku: skuField.value,
-          productName: productNameField.value,
-          category: categoryField.value,
-          fallbackPrice: price,
-          cost: costField.parsed,
-          inventory: inventoryField.parsed,
-          productIndexes
-        });
-        const productId = resolvedProduct.productId;
-        const productKey = String(productId);
-
-        detectedProductKeys.add(productKey);
-        if (externalProductId) externalProductIds.add(externalProductId);
-
-        if (resolvedProduct.status === "created") {
-          createdProductKeys.add(productKey);
-        } else {
-          matchedProductKeys.add(productKey);
-        }
-
-        segmentCounts[customerSegment.label] = (segmentCounts[customerSegment.label] || 0) + 1;
-
-        records.push({
-          workspaceId: getWorkspaceId(req),
-          productId,
-          price,
-          quantity: quantityField.parsed,
-          competitorPrice: Number.isFinite(competitorPriceField.parsed) ? competitorPriceField.parsed : undefined,
-          cost: Number.isFinite(costField.parsed) ? costField.parsed : undefined,
-          inventory: Number.isFinite(inventoryField.parsed) ? inventoryField.parsed : undefined,
-          revenue: Number.isFinite(revenueField.parsed) ? revenueField.parsed : price * quantityField.parsed,
-          grossMargin: Number.isFinite(grossMarginField.parsed) ? grossMarginField.parsed : undefined,
-          region: isBlank(regionField.value) ? undefined : String(regionField.value).trim(),
-          channel: isBlank(channelField.value) ? undefined : String(channelField.value).trim(),
-          promotion: isPromotion,
-          discount: Number.isFinite(discountField.parsed) ? discountField.parsed : undefined,
-          holiday: isHoliday,
-          marketingSpend: Number.isFinite(marketingSpendField.parsed) ? marketingSpendField.parsed : undefined,
-          stockoutFlag: isStockout,
-          dateParts,
-          externalProductId,
-          customerSegment: customerSegment.key,
-          customerSegmentLabel: customerSegment.label,
-          productSnapshot: {
-            externalProductId,
-            sku: String(skuField.value || resolvedProduct.product?.sku || (externalProductId ? `PID-${externalProductId}` : "")).trim(),
-            name: String(productNameField.value || resolvedProduct.product?.name || (externalProductId ? `Product ${externalProductId}` : "")).trim(),
-            category: String(categoryField.value || resolvedProduct.product?.category || "").trim()
-          },
-          date,
-          rowFingerprint,
-          importBatchId: importBatch._id,
-          importMeta: {
-            source,
-            rowNumber
-          }
-        });
-      } catch (error) {
-        errors.push({
-          row: rowNumber,
-          reason: error.message.replace(`Row ${rowNumber}: `, "")
-        });
-        rowIssues.push({
-          workspaceId: getWorkspaceId(req),
-          importBatchId: importBatch._id,
-          source,
-          rowNumber,
-          reason: error.message.replace(`Row ${rowNumber}: `, ""),
-          rawRow
-        });
-      }
-    }
-
-    const existingFingerprints = records.length
-      ? await SalesData.find(workspaceFilter(req, { rowFingerprint: { $in: records.map((record) => record.rowFingerprint) } }))
-        .select("rowFingerprint")
-        .lean()
-      : [];
-    const existingFingerprintSet = new Set(existingFingerprints.map((record) => record.rowFingerprint));
-    const uniqueRecords = records.filter((record) => {
-      if (!existingFingerprintSet.has(record.rowFingerprint)) return true;
-      duplicateRowsSkipped += 1;
-      return false;
-    });
-
-    if (stockoutRowsDetected > 0) {
-      datasetWarnings.push(`${stockoutRowsDetected} stockout row${stockoutRowsDetected === 1 ? "" : "s"} detected; those rows will be excluded from model fitting.`);
-    }
-
-    if (promotionRowsDetected > 0) {
-      datasetWarnings.push(`${promotionRowsDetected} promotional row${promotionRowsDetected === 1 ? "" : "s"} detected; promotions may affect demand.`);
-    }
-
-    if (!costRowsDetected) {
-      datasetWarnings.push("No cost values were imported. Profit recommendations will be blocked unless a product has trusted cost data.");
-    }
-
-    if (belowCostRowsDetected > 0) {
-      datasetWarnings.push(`${belowCostRowsDetected} row${belowCostRowsDetected === 1 ? "" : "s"} had price below cost. Review cost or price before trusting profit.`);
-    }
-
-    if (zeroQuantityRowsDetected > rowsToProcess.length * 0.25) {
-      datasetWarnings.push("More than 25% of processed rows had zero quantity. Demand models may be weak.");
-    }
-
-    const importReadiness = uniqueRecords.reduce(
-      (summary, record) => {
-        const productKey = String(record.productId);
-        const product = summary.byProduct.get(productKey) || { records: 0, prices: new Set() };
-        product.records += 1;
-        product.prices.add(Number(record.price).toFixed(4));
-        summary.byProduct.set(productKey, product);
-        return summary;
-      },
-      { byProduct: new Map() }
-    );
-    const readinessCounts = [...importReadiness.byProduct.values()].reduce(
-      (counts, product) => {
-        if (product.records >= 8 && product.prices.size >= 3) counts.ready += 1;
-        else if (product.records >= 3 && product.prices.size >= 2) counts.limited += 1;
-        else counts.notReady += 1;
-        return counts;
-      },
-      { ready: 0, limited: 0, notReady: 0 }
-    );
-    const importDataFitnessScore = uniqueRecords.length
-      ? Math.max(0, Math.min(100, Math.round(
-        (readinessCounts.ready * 100 + readinessCounts.limited * 65 + readinessCounts.notReady * 25) /
-        Math.max(1, readinessCounts.ready + readinessCounts.limited + readinessCounts.notReady) -
-        (costRowsDetected ? 0 : 20) -
-        (belowCostRowsDetected ? 10 : 0) -
-        (stockoutRowsDetected > rowsToProcess.length * 0.25 ? 15 : 0)
-      )))
-      : 0;
-    const importDataFitnessLabel = importDataFitnessScore >= 75
-      ? "Model usable"
-      : importDataFitnessScore >= 50
-        ? "Model risky"
-        : readinessCounts.ready + readinessCounts.limited > 0
-          ? "Recommendation blocked"
-          : "Summary only";
-    const costQualitySummary = {
-      label: costRowsDetected ? (belowCostRowsDetected ? "inconsistent" : "real") : "missing",
-      costRows: costRowsDetected,
-      coveragePercent: rowsToProcess.length ? Number(((costRowsDetected / rowsToProcess.length) * 100).toFixed(1)) : 0,
-      belowCostRows: belowCostRowsDetected
-    };
-
-    const responseBase = {
-      totalRows,
-      processedRows: rowsToProcess.length,
-      importedRows: uniqueRecords.length,
-      skippedRows: errors.length + duplicateRowsSkipped,
-      rowsReceived: totalRows,
-      insertedCount: uniqueRecords.length,
-      skippedCount: errors.length + duplicateRowsSkipped,
-      reportAvailable: true,
-      latestImportSource: source,
-      importBatchId: importBatch._id,
-      latestImportReportUrl: `/reports/import-summary.xlsx?source=${encodeURIComponent(source)}`,
-      duplicateRowsSkipped,
-      invalidRowsSkipped: errors.length,
-      productsDetected: detectedProductKeys.size,
-      externalProductIdsDetected: externalProductIds.size,
-      productIdentityMode: externalProductIds.size > 0 ? "externalProductId" : mapping.mappedFields.sku ? "sku" : mapping.mappedFields.productName ? "productName" : "category",
-      newProductsCreated: createdProductKeys.size,
-      existingProductsMatched: [...matchedProductKeys].filter((productKey) => !createdProductKeys.has(productKey)).length,
-      segmentsDetected: segmentCounts,
-      detectedOptionalFields,
-      datasetWarnings,
-      productsReady: readinessCounts.ready,
-      productsLimited: readinessCounts.limited,
-      productsNotReady: readinessCounts.notReady,
-      productsWithModelReadyData: readinessCounts.ready + readinessCounts.limited,
-      productsWithSummaryOnlyData: readinessCounts.notReady,
-      dataFitnessScore: importDataFitnessScore,
-      dataFitnessLabel: importDataFitnessLabel,
-      costQualitySummary,
-      truncated,
-      detectedColumns: mapping.detectedColumns,
-      mappedFields: mapping.mappedFields,
-      errors: errors.slice(0, 10),
-      conflicts
-    };
-
-    const importBatchUpdate = {
-      status: uniqueRecords.length ? (errors.length ? "completed_with_errors" : "completed") : "failed",
-      detectedOptionalFields,
+    await ImportBatch.findByIdAndUpdate(importBatch._id, {
+      status: "quality_review",
       rowCounts: {
         totalRows,
         processedRows: rowsToProcess.length,
-        importedRows: uniqueRecords.length,
-        skippedRows: errors.length + duplicateRowsSkipped,
-        duplicateRowsSkipped,
-        invalidRowsSkipped: errors.length
+        importedRows: 0,
+        skippedRows: qualitySummary.error,
+        duplicateRowsSkipped: rows.filter((row) => row.issueCodes?.includes("STRUCTURAL_ERROR") && row.issueReasons?.some((reason) => reason.includes("duplicate"))).length,
+        invalidRowsSkipped: qualitySummary.error
       },
       productSummary: {
-        productsDetected: detectedProductKeys.size,
-        externalProductIdsDetected: externalProductIds.size,
-        productIdentityMode: responseBase.productIdentityMode,
-        newProductsCreated: createdProductKeys.size,
-        existingProductsMatched: responseBase.existingProductsMatched,
-        productsReady: readinessCounts.ready,
-        productsLimited: readinessCounts.limited,
-        productsNotReady: readinessCounts.notReady
+        productsDetected: qualitySummary.productsDetected,
+        productsReady: qualitySummary.productsReady,
+        productsLimited: qualitySummary.productsLimited,
+        productsNotReady: qualitySummary.productsNotReady
       },
-      segmentCounts,
+      segmentCounts: qualitySummary.segmentsDetected,
       conflicts,
-      datasetWarnings,
-      dataFitnessScore: importDataFitnessScore,
-      dataFitnessLabel: importDataFitnessLabel,
-      costQualitySummary,
-      completedAt: new Date()
-    };
-
-    if (rowIssues.length) {
-      await ImportRowIssue.insertMany(rowIssues.slice(0, 250), { ordered: false });
-    }
-
-    await ImportBatch.findByIdAndUpdate(importBatch._id, importBatchUpdate);
-
-    if (!uniqueRecords.length) {
-      if (duplicateRowsSkipped > 0 && errors.length === 0) {
-        return res.json({
-          success: true,
-          data: responseBase
-        });
-      }
-
-      return res.status(400).json({
-        success: false,
-        error: {
-          message: "No valid sales rows found. Include product identity, price or revenue, and quantity.",
-          statusCode: 400,
-          ...responseBase
-        }
-      });
-    }
-
-    for (let index = 0; index < uniqueRecords.length; index += INSERT_BATCH_SIZE) {
-      await SalesData.insertMany(uniqueRecords.slice(index, index + INSERT_BATCH_SIZE), { ordered: false });
-    }
-    await setLatestImportBatchActive(importBatch._id);
-    await logAudit(req, {
-      action: "upload.sales_csv",
-      targetType: "ImportBatch",
-      targetId: importBatch._id,
-      summary: `Uploaded sales CSV ${source}`,
-      metadata: {
-        importedRows: uniqueRecords.length,
-        skippedRows: errors.length + duplicateRowsSkipped,
-        truncated
+      datasetWarnings: qualitySummary.datasetWarnings,
+      qualitySummary,
+      dataFitnessScore: qualitySummary.dataFitnessScore,
+      dataFitnessLabel: qualitySummary.dataFitnessLabel,
+      costQualitySummary: {
+        label: qualitySummary.costRows ? "real" : "missing",
+        costRows: qualitySummary.costRows,
+        coveragePercent: qualitySummary.costCoveragePercent
       }
     });
+    await logAudit(req, {
+      action: "upload.batch_staged",
+      targetType: "ImportBatch",
+      targetId: importBatch._id,
+      summary: `Staged sales CSV ${req.file.originalname}`,
+      metadata: qualitySummary
+    });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      data: responseBase
+      data: {
+        importBatchId: importBatch._id,
+        status: "quality_review",
+        expiresAt: importBatch.expiresAt,
+        reviewRequired: true,
+        ...qualitySummary,
+        rowsReceived: totalRows,
+        insertedCount: 0,
+        importedRows: 0,
+        skippedRows: qualitySummary.error,
+        latestImportSource: req.file.originalname,
+        latestImportReportUrl: `/reports/import-summary.xlsx?source=${encodeURIComponent(req.file.originalname)}`,
+        errors: rows.filter((row) => row.rowStatus === "error").slice(0, 10).map((row) => ({ row: row.rowNumber, reason: row.issueReasons.join("; ") })),
+        conflicts,
+        message: "CSV staged for quality review. Commit is required before dashboards or models change."
+      }
     });
   } catch (error) {
     error.statusCode = error.statusCode || 400;
     next(error);
   } finally {
-    if (req.file?.path) {
-      unlink(req.file.path).catch(() => {});
+    if (req.file?.path) unlink(req.file.path).catch(() => {});
+  }
+}
+
+uploadRouter.post("/sales/preview", upload.single("file"), handlePreview);
+uploadRouter.post("/sales/stage", upload.single("file"), handleStage);
+uploadRouter.post("/sales", upload.single("file"), handleStage);
+
+uploadRouter.get("/sales/batches/:id/review", async (req, res, next) => {
+  try {
+    res.json({
+      success: true,
+      data: await buildReviewPayload(req, req.params.id)
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+uploadRouter.post("/sales/batches/:id/reject", async (req, res, next) => {
+  try {
+    const batch = await ImportBatch.findOne({ _id: req.params.id, workspaceId: getWorkspaceId(req) });
+    ensureBatchIsReviewable(batch);
+    batch.status = "rejected";
+    batch.rejectedAt = new Date();
+    await batch.save();
+    await SalesDataStaging.deleteMany({ workspaceId: getWorkspaceId(req), importBatchId: batch._id });
+    await logAudit(req, {
+      action: "upload.batch_rejected",
+      targetType: "ImportBatch",
+      targetId: batch._id,
+      summary: `Rejected staged sales CSV ${batch.source}`
+    });
+
+    res.json({
+      success: true,
+      data: {
+        importBatchId: batch._id,
+        status: "rejected",
+        message: "Staged upload rejected. No dashboard or model data was changed."
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+uploadRouter.post("/sales/batches/:id/commit", requireAuth(["admin", "manager"]), async (req, res, next) => {
+  try {
+    const batch = await ImportBatch.findOne({ _id: req.params.id, workspaceId: getWorkspaceId(req) });
+    ensureBatchIsReviewable(batch);
+
+    const stagedRows = await SalesDataStaging.find({
+      workspaceId: getWorkspaceId(req),
+      importBatchId: batch._id,
+      rowStatus: { $ne: "error" }
+    }).sort({ rowNumber: 1 }).lean();
+
+    if (!stagedRows.length) {
+      return res.status(400).json({
+        success: false,
+        error: { message: "No commit-eligible rows are available in this batch.", statusCode: 400 }
+      });
     }
+
+    const archived = await archiveActiveDataset(req, "Replaced by committed import batch", batch._id);
+    const productMap = await createProductMapForCommit(req, stagedRows, batch._id);
+    const salesRows = stagedRows.map((row) => stagingRowToSalesData(req, row, productMap.get(row.productIdentityKey), batch._id));
+
+    for (let index = 0; index < salesRows.length; index += INSERT_BATCH_SIZE) {
+      await SalesData.insertMany(salesRows.slice(index, index + INSERT_BATCH_SIZE), { ordered: false });
+    }
+
+    batch.status = "committed";
+    batch.committedAt = new Date();
+    batch.committedBy = getActor(req);
+    batch.replacedImportBatchId = archived.previousImportBatchId;
+    batch.expiresAt = undefined;
+    batch.rowCounts = {
+      ...(batch.rowCounts || {}),
+      importedRows: salesRows.length,
+      skippedRows: (batch.qualitySummary?.error || 0),
+      invalidRowsSkipped: (batch.qualitySummary?.error || 0)
+    };
+    await batch.save();
+    await SalesDataStaging.deleteMany({ workspaceId: getWorkspaceId(req), importBatchId: batch._id });
+    await setLatestImportBatchActive(batch._id);
+    await logAudit(req, {
+      action: "upload.batch_committed",
+      targetType: "ImportBatch",
+      targetId: batch._id,
+      summary: `Committed sales dataset ${batch.source}`,
+      metadata: {
+        committedRows: salesRows.length,
+        archived: archived.archived,
+        modelEligibleRows: salesRows.filter((row) => !row.excludedFromModel).length
+      }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        importBatchId: batch._id,
+        status: "committed",
+        committedRows: salesRows.length,
+        modelEligibleRows: salesRows.filter((row) => !row.excludedFromModel).length,
+        archived: archived.archived,
+        message: "Dataset committed. Dashboards, products, insights, simulator, and recommendations now use this verified data."
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+uploadRouter.post("/sales/batches/:id/rollback", requireAuth(["admin", "manager"]), async (req, res, next) => {
+  try {
+    const targetBatch = await ImportBatch.findOne({ _id: req.params.id, workspaceId: getWorkspaceId(req) });
+
+    if (!targetBatch || !["committed", "archived"].includes(targetBatch.status)) {
+      return res.status(404).json({
+        success: false,
+        error: { message: "Rollback target must be a committed or archived import batch.", statusCode: 404 }
+      });
+    }
+
+    const rollbackCutoff = new Date(Date.now() - ROLLBACK_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    if (targetBatch.committedAt && targetBatch.committedAt < rollbackCutoff) {
+      return res.status(409).json({
+        success: false,
+        error: { message: `Rollback window is ${ROLLBACK_WINDOW_DAYS} days. This batch is too old to restore safely.`, statusCode: 409 }
+      });
+    }
+
+    const archiveResult = await archiveActiveDataset(req, "Archived by rollback", targetBatch._id);
+    await SalesData.updateMany(
+      { workspaceId: getWorkspaceId(req), importBatchId: targetBatch._id },
+      {
+        $set: {
+          datasetStatus: "active",
+          archivedAt: null,
+          archiveReason: ""
+        }
+      }
+    );
+    const restoredRows = await SalesData.find({
+      workspaceId: getWorkspaceId(req),
+      importBatchId: targetBatch._id,
+      datasetStatus: "active"
+    }).lean();
+    const productMap = await createProductMapForCommit(req, restoredRows.map((row) => ({
+      ...row,
+      productIdentityKey: normalizeProductKey(row.productSnapshot?.sku || row.externalProductId || row.productSnapshot?.name),
+      productSnapshot: row.productSnapshot
+    })), targetBatch._id);
+    await Promise.all(restoredRows.map((row) => {
+      const key = normalizeProductKey(row.productSnapshot?.sku || row.externalProductId || row.productSnapshot?.name);
+      const product = productMap.get(key);
+      return product ? SalesData.updateOne({ _id: row._id }, { $set: { productId: product._id } }) : Promise.resolve();
+    }));
+    await ImportBatch.updateMany(
+      { workspaceId: getWorkspaceId(req), status: "committed", _id: { $ne: targetBatch._id } },
+      { $set: { status: "archived", archivedAt: new Date() } }
+    );
+    targetBatch.status = "committed";
+    targetBatch.rollbackOfImportBatchId = archiveResult.previousImportBatchId;
+    await targetBatch.save();
+    await setLatestImportBatchActive(targetBatch._id);
+    await logAudit(req, {
+      action: "upload.batch_rollback",
+      targetType: "ImportBatch",
+      targetId: targetBatch._id,
+      summary: `Rolled back to dataset ${targetBatch.source}`,
+      metadata: { archived: archiveResult.archived }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        importBatchId: targetBatch._id,
+        status: "committed",
+        restoredRows: restoredRows.length,
+        archived: archiveResult.archived,
+        message: "Rollback complete. The selected verified dataset is active again."
+      }
+    });
+  } catch (error) {
+    next(error);
   }
 });

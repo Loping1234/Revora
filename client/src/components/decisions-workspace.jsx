@@ -55,6 +55,8 @@ import {
   TrustStrip,
   WarningPanel
 } from "./common";
+import { useViewMode } from "../lib/view-mode";
+import { ScenarioComparisonChart } from "./charts";
 
 function formatImprovementRange(range, fallback) {
   if (range && Number.isFinite(Number(range.low)) && Number.isFinite(Number(range.high))) {
@@ -99,6 +101,7 @@ export function PriceSimulatorPanel({
   simulationResult,
   handleSimulatePrice
 }) {
+  const { detailed } = useViewMode();
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
       <SectionHeader
@@ -265,7 +268,7 @@ export function PriceSimulatorPanel({
             </div>
           )}
 
-          {simulationResult.demandWorking && (
+          {detailed && simulationResult.demandWorking && (
             <details className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600" open>
               <summary className="cursor-pointer text-sm font-semibold text-slate-900">Show working</summary>
               <div className="mt-3 grid gap-4">
@@ -354,6 +357,7 @@ export function PriceSimulatorPanel({
 
           <WarningPanel warnings={simulationResult.warnings} />
 
+          {detailed && (
           <details className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600">
             <summary className="cursor-pointer font-medium text-slate-800">How this was calculated</summary>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -381,6 +385,7 @@ export function PriceSimulatorPanel({
               </div>
             )}
           </details>
+          )}
         </div>
       )}
     </section>
@@ -460,6 +465,15 @@ export function ScenarioPlannerPanel({
             <p className="text-sm font-medium text-slate-900">Decision supported</p>
             <p className="mt-2 text-sm text-slate-600">{scenarioResult.decisionSupported}</p>
           </section>
+
+          {scenarioResult?.scenarios?.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <p className="text-sm font-semibold text-slate-900">Scenario comparison</p>
+              <div className="mt-4">
+                <ScenarioComparisonChart scenarios={scenarioResult.scenarios} currency={currency} />
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-4 xl:grid-cols-3">
             {scenarioResult.scenarios.map((scenario) => (
@@ -558,6 +572,7 @@ export function RecommendationPanel({
   recommendationResult,
   handleCreateRecommendation
 }) {
+  const { detailed } = useViewMode();
   const topTestedPrices = recommendationResult?.testedPrices
     ? [...recommendationResult.testedPrices]
         .sort((a, b) => {
@@ -828,7 +843,7 @@ export function RecommendationPanel({
             </div>
           </div>
 
-          {recommendationResult.calculationSteps?.length > 0 && (
+          {detailed && recommendationResult.calculationSteps?.length > 0 && (
             <details className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600" open>
               <summary className="cursor-pointer font-medium text-slate-800">Show working</summary>
               <div className="mt-3 grid gap-1">

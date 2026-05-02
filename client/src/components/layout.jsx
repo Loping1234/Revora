@@ -1,6 +1,8 @@
 import {
   BarChart3,
   CheckCircle2,
+  Eye,
+  EyeOff,
   LogOut,
   Menu,
   ShieldCheck,
@@ -9,6 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { login } from "../lib/api";
+import { useViewMode } from "../lib/view-mode";
 import { sidebarItems } from "../config/navigation";
 import {
   StatusPill
@@ -104,6 +107,26 @@ export function WorkspaceTabs({ tabs }) {
   );
 }
 
+function ViewModeToggle() {
+  const { detailed, setDetailed } = useViewMode();
+
+  return (
+    <button
+      aria-label={detailed ? "Switch to Simple View" : "Switch to Detailed View"}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+        detailed
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+      }`}
+      onClick={() => setDetailed(!detailed)}
+      type="button"
+    >
+      {detailed ? <Eye size={13} /> : <EyeOff size={13} />}
+      {detailed ? "Detailed View" : "Simple View"}
+    </button>
+  );
+}
+
 export function AppShell({
   activeItem,
   apiBaseUrl,
@@ -159,6 +182,7 @@ export function AppShell({
                   <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium capitalize">{session.user.role}</span>
                 </div>
                 <StatusPill state={status} />
+                <ViewModeToggle />
                 <details className="relative">
                   <summary className="list-none rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
                     Details

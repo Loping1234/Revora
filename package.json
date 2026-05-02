@@ -17,7 +17,8 @@
     "test:matching": "node server/src/test/product-matching.test.mjs",
     "test:fitness": "node server/src/test/data-fitness.test.mjs",
     "test:trust": "node server/src/test/trust-policy.test.mjs",
-    "test:reliability": "npm run test:matching && npm run test:fitness && npm run test:trust",
+    "test:quality-gate": "node server/src/test/data-quality-gate.test.mjs",
+    "test:reliability": "npm run test:matching && npm run test:fitness && npm run test:trust && npm run test:quality-gate",
     "smoke": "node scripts/smoke-test.mjs"
   },
   "devDependencies": {

@@ -26,8 +26,8 @@ export async function getActiveImportBatchId() {
 export async function getActiveImportBatchFilter() {
   const activeImportBatchId = await getActiveImportBatchId();
   return activeImportBatchId
-    ? { workspaceId: DEFAULT_WORKSPACE_ID, importBatchId: new mongoose.Types.ObjectId(activeImportBatchId) }
-    : { workspaceId: DEFAULT_WORKSPACE_ID };
+    ? { workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active", importBatchId: new mongoose.Types.ObjectId(activeImportBatchId) }
+    : { workspaceId: DEFAULT_WORKSPACE_ID, datasetStatus: "active" };
 }
 
 export async function setActiveImportBatch(importBatchId) {
@@ -45,6 +45,12 @@ export async function setActiveImportBatch(importBatchId) {
     if (!batch) {
       const error = new Error("Import batch not found");
       error.statusCode = 404;
+      throw error;
+    }
+
+    if (batch.status !== "committed") {
+      const error = new Error("Only committed import batches can be selected for modeling.");
+      error.statusCode = 409;
       throw error;
     }
   }
@@ -94,9 +100,15 @@ export async function listImportBatches() {
       completedAt: batch.completedAt,
       rowCounts: batch.rowCounts || {},
       productSummary: batch.productSummary || {},
+      qualitySummary: batch.qualitySummary || {},
       dataFitnessScore: batch.dataFitnessScore,
       dataFitnessLabel: batch.dataFitnessLabel,
       datasetWarnings: batch.datasetWarnings || [],
+      expiresAt: batch.expiresAt,
+      committedAt: batch.committedAt,
+      rejectedAt: batch.rejectedAt,
+      abandonedAt: batch.abandonedAt,
+      archivedAt: batch.archivedAt,
       active: activeImportBatchId ? String(batch._id) === String(activeImportBatchId) : false
     }))
   };

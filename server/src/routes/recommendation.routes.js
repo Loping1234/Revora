@@ -46,7 +46,7 @@ recommendationRouter.post("/", requireAuth(["admin", "analyst"]), async (req, re
 
 recommendationRouter.get("/", async (req, res, next) => {
   try {
-    const query = workspaceFilter(req);
+    const query = workspaceFilter(req, { datasetStatus: "active" });
 
     if (req.query.productId) {
       if (!mongoose.Types.ObjectId.isValid(req.query.productId)) {

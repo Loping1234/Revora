@@ -54,6 +54,8 @@ import {
   TrustStrip,
   WarningPanel
 } from "./common";
+import { useViewMode } from "../lib/view-mode";
+import { DemandCurveChart, SeasonalityHeatmap } from "./charts";
 
 export function PricingInsightsPanel({
   products,
@@ -72,6 +74,7 @@ export function PricingInsightsPanel({
   latestModel,
   currency = "USD"
 }) {
+  const { detailed } = useViewMode();
   const modelWarnings = latestModel?.warnings || [];
   const readyItems = readiness?.ready || [];
   const limitedExamples = readiness?.limitedExamples || [];
@@ -258,7 +261,7 @@ export function PricingInsightsPanel({
         </div>
       )}
 
-      {latestModel && latestModel.resultMode === "Price Response Model" && (
+      {detailed && latestModel && latestModel.resultMode === "Price Response Model" && (
         <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
           <p className="text-sm font-medium text-slate-900">Decision supported</p>
           <p className="mt-2 text-sm leading-6 text-slate-600">
@@ -277,7 +280,7 @@ export function PricingInsightsPanel({
         </div>
       )}
 
-      {latestModel?.modelComparison && latestModel.resultMode === "Price Response Model" && (
+      {detailed && latestModel?.modelComparison && latestModel.resultMode === "Price Response Model" && (
         <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -317,6 +320,50 @@ export function PricingInsightsPanel({
               Accuracy check unavailable: {(latestModel.backtestMetrics || latestModel.accuracyMetrics)?.reason || "not enough held-out demand points yet."}
             </p>
           )}
+          {(() => {
+            const bc = (latestModel.backtestMetrics || latestModel.accuracyMetrics)?.baselineComparison;
+            if (!bc?.available) return null;
+            const modelMAPE = Number((latestModel.backtestMetrics || latestModel.accuracyMetrics).demandMAPE || 0);
+            return (
+              <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+                <p className="text-sm font-semibold text-slate-900">Baseline comparison</p>
+                <p className="mt-1 text-xs text-slate-500">Does the model beat simple guessing? Compared on the same held-out sales rows.</p>
+                <div className={`mt-2 rounded-md px-3 py-2 text-sm font-medium ${bc.modelBeatsBaseline ? "border border-emerald-200 bg-emerald-50 text-emerald-800" : "border border-rose-200 bg-rose-50 text-rose-800"}`}>
+                  {bc.modelBeatsBaseline
+                    ? `Model beats the best naive baseline (${bc.bestBaselineLabel}) by ${Number(bc.improvementPercent || 0).toFixed(1)}%.`
+                    : `Model did NOT outperform the ${bc.bestBaselineLabel} baseline. Recommendations are blocked until the model can prove it adds value over simple guessing.`}
+                </div>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                        <th className="py-2 pr-3 font-medium">Method</th>
+                        <th className="py-2 pr-3 font-medium">Demand Error</th>
+                        <th className="py-2 pr-3 font-medium">Revenue Error</th>
+                        <th className="py-2 pr-3 font-medium">vs Model</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(bc.baselines || []).map((baseline) => (
+                        <tr key={baseline.name} className="border-b border-slate-100 last:border-0">
+                          <td className="py-2 pr-3 font-medium text-slate-900">{baseline.label}</td>
+                          <td className="py-2 pr-3 text-slate-600">{Number(baseline.demandMAPE || 0).toFixed(1)}%</td>
+                          <td className="py-2 pr-3 text-slate-600">{Number(baseline.revenueMAPE || 0).toFixed(1)}%</td>
+                          <td className="py-2 pr-3">{modelMAPE <= baseline.demandMAPE ? <span className="text-emerald-700">Model wins ✓</span> : <span className="text-rose-700">Baseline wins</span>}</td>
+                        </tr>
+                      ))}
+                      <tr className="border-t-2 border-slate-300">
+                        <td className="py-2 pr-3 font-semibold text-slate-900">Your Model</td>
+                        <td className="py-2 pr-3 font-semibold text-slate-900">{modelMAPE.toFixed(1)}%</td>
+                        <td className="py-2 pr-3 font-semibold text-slate-900">{Number((latestModel.backtestMetrics || latestModel.accuracyMetrics).revenueMAPE || 0).toFixed(1)}%</td>
+                        <td className="py-2 pr-3 text-slate-400">—</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
           {latestModel.predictionIntervals?.demand && (
             <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
               <p className="text-sm font-semibold text-slate-900">Prediction range at average price</p>
@@ -388,6 +435,7 @@ export function PricingInsightsPanel({
           </div>
         </section>
 
+        {detailed && (
         <section className="rounded-md border border-slate-200 bg-white p-4">
           <h3 className="text-sm font-semibold text-slate-900">Why some insights fail</h3>
           <p className="mt-1 text-xs text-slate-500">These examples have only 1-2 rows, so the model correctly refuses to fit.</p>
@@ -400,10 +448,18 @@ export function PricingInsightsPanel({
             {!limitedExamples.length && <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">Limited combinations will appear here after sales data is imported.</p>}
           </div>
         </section>
+        )}
       </div>
 
       {latestModel?.resultMode === "Price Response Model" && (
         <div className="mt-4">
+          <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
+            <p className="text-sm font-semibold text-slate-900">Price vs demand curve</p>
+            <p className="mt-1 text-xs text-slate-500">Dots are actual grouped demand points. The line is the fitted model prediction.</p>
+            <div className="mt-3">
+              <DemandCurveChart model={latestModel} currency={currency} />
+            </div>
+          </div>
           <CalculationWorkingPanel
             title="Show working"
             defaultOpen
@@ -463,7 +519,7 @@ export function SeasonalityPanel({ seasonality, state, message, refreshSeasonali
           <h3 className="text-sm font-semibold text-slate-900">Demand index by month</h3>
           <p className="mt-1 text-xs text-slate-500">100 means average monthly demand. Higher means stronger demand month.</p>
           <div className="mt-4">
-            <HorizontalBars items={monthly} labelKey="month" valueKey="demandIndex" valueFormatter={(value) => `${Number(value).toFixed(1)} index`} emptyText="No monthly demand history available." />
+            <SeasonalityHeatmap data={monthly} />
           </div>
         </section>
         <section className="rounded-lg border border-slate-200 bg-slate-50 p-4">

@@ -17,8 +17,20 @@ const importBatchSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["processing", "completed", "completed_with_errors", "failed"],
-      default: "processing",
+      enum: [
+        "processing",
+        "completed",
+        "completed_with_errors",
+        "mapping_pending",
+        "staged",
+        "quality_review",
+        "committed",
+        "rejected",
+        "abandoned",
+        "archived",
+        "failed"
+      ],
+      default: "mapping_pending",
       index: true
     },
     detectedColumns: [String],
@@ -76,6 +88,33 @@ const importBatchSchema = new mongoose.Schema(
     costQualitySummary: {
       type: mongoose.Schema.Types.Mixed,
       default: {}
+    },
+    qualitySummary: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    expiresAt: {
+      type: Date,
+      index: true
+    },
+    committedAt: Date,
+    rejectedAt: Date,
+    abandonedAt: Date,
+    archivedAt: Date,
+    committedBy: {
+      id: String,
+      name: String,
+      role: String
+    },
+    replacedImportBatchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ImportBatch",
+      index: true
+    },
+    rollbackOfImportBatchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ImportBatch",
+      index: true
     },
     truncated: {
       type: Boolean,

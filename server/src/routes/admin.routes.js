@@ -6,6 +6,7 @@ import { Product } from "../models/product.model.js";
 import { RecommendationOutcome } from "../models/recommendation-outcome.model.js";
 import { Recommendation } from "../models/recommendation.model.js";
 import { SalesData } from "../models/sales-data.model.js";
+import { SalesDataStaging } from "../models/sales-data-staging.model.js";
 import { logAudit } from "../services/audit.service.js";
 import { workspaceFilter } from "../utils/workspace.js";
 
@@ -13,8 +14,9 @@ export const adminRouter = Router();
 
 async function getResetCounts(req) {
   const filter = workspaceFilter(req);
-  const [salesRows, products, pricingInsights, recommendations, recommendationOutcomes, importBatches, importRowIssues] = await Promise.all([
+  const [salesRows, stagingRows, products, pricingInsights, recommendations, recommendationOutcomes, importBatches, importRowIssues] = await Promise.all([
     SalesData.countDocuments(filter),
+    SalesDataStaging.countDocuments(filter),
     Product.countDocuments(filter),
     DemandModel.countDocuments(filter),
     Recommendation.countDocuments(filter),
@@ -25,6 +27,7 @@ async function getResetCounts(req) {
 
   return {
     salesRows,
+    stagingRows,
     products,
     pricingInsights,
     recommendations,
@@ -65,8 +68,9 @@ adminRouter.post("/reset-data", async (req, res, next) => {
     });
 
     const filter = workspaceFilter(req);
-    const [salesData, products, demandModels, recommendations, recommendationOutcomes, importBatches, importRowIssues] = await Promise.all([
+    const [salesData, stagingData, products, demandModels, recommendations, recommendationOutcomes, importBatches, importRowIssues] = await Promise.all([
       SalesData.deleteMany(filter),
+      SalesDataStaging.deleteMany(filter),
       Product.deleteMany(filter),
       DemandModel.deleteMany(filter),
       Recommendation.deleteMany(filter),
@@ -80,6 +84,7 @@ adminRouter.post("/reset-data", async (req, res, next) => {
       data: {
         deleted: {
           salesRows: salesData.deletedCount || 0,
+          stagingRows: stagingData.deletedCount || 0,
           products: products.deletedCount || 0,
           pricingInsights: demandModels.deletedCount || 0,
           recommendations: recommendations.deletedCount || 0,

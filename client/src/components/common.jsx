@@ -1,5 +1,6 @@
 import { Component } from "react";
 import { formatCurrency } from "../utils/formatters";
+import { useViewMode } from "../lib/view-mode";
 
 function trustTone(label) {
   const normalized = String(label || "").toLowerCase();
@@ -167,9 +168,10 @@ export function SummaryCard({ icon: Icon, label, value, note }) {
 }
 
 export function ExplainableNumber({ children, title = "How this was calculated", lines = [], className = "" }) {
+  const { detailed } = useViewMode();
   const visibleLines = lines.filter(Boolean);
 
-  if (!visibleLines.length) {
+  if (!visibleLines.length || !detailed) {
     return <span className={className}>{children}</span>;
   }
 
@@ -189,11 +191,13 @@ export function ExplainableNumber({ children, title = "How this was calculated",
 }
 
 export function CalculationWorkingPanel({ title = "Show working", summary, items = [], formulas = [], evidence = [], defaultOpen = false }) {
+  const { detailed } = useViewMode();
   const visibleItems = items.filter((item) => item?.label || item?.value);
   const visibleFormulas = formulas.filter(Boolean);
   const visibleEvidence = evidence.filter(Boolean);
 
   if (!summary && !visibleItems.length && !visibleFormulas.length && !visibleEvidence.length) return null;
+  if (!detailed) return null;
 
   return (
     <details className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600" open={defaultOpen}>
@@ -226,6 +230,19 @@ export function CalculationWorkingPanel({ title = "Show working", summary, items
           </div>
         )}
       </div>
+    </details>
+  );
+}
+
+export function OptionalDetailsPanel({ children, title, className = "" }) {
+  const { detailed } = useViewMode();
+
+  if (!detailed) return null;
+
+  return (
+    <details className={`rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600 ${className}`}>
+      <summary className="cursor-pointer text-sm font-semibold text-slate-900">{title || "Technical details"}</summary>
+      <div className="mt-3">{children}</div>
     </details>
   );
 }

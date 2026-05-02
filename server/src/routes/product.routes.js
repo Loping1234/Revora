@@ -58,7 +58,7 @@ function findDuplicateProducts(products) {
 
 productRouter.get("/", async (req, res, next) => {
   try {
-    const filter = workspaceFilter(req);
+    const filter = workspaceFilter(req, { datasetStatus: "active" });
     const products = await Product.find(filter).sort({ name: 1 }).lean();
     const salesCounts = await SalesData.aggregate([
       { $match: filter },
@@ -106,7 +106,7 @@ productRouter.get("/", async (req, res, next) => {
 
 productRouter.get("/duplicates", async (req, res, next) => {
   try {
-    const products = await Product.find(workspaceFilter(req)).sort({ category: 1, name: 1 }).lean();
+    const products = await Product.find(workspaceFilter(req, { datasetStatus: "active" })).sort({ category: 1, name: 1 }).lean();
 
     res.json({
       success: true,
@@ -132,8 +132,8 @@ productRouter.post("/merge", requireApiKey, requireAuth(["admin"]), async (req, 
     }
 
     const [master, duplicate] = await Promise.all([
-      Product.findOne({ _id: masterProductId, workspaceId: getWorkspaceId(req) }),
-      Product.findOne({ _id: duplicateProductId, workspaceId: getWorkspaceId(req) })
+      Product.findOne({ _id: masterProductId, workspaceId: getWorkspaceId(req), datasetStatus: "active" }),
+      Product.findOne({ _id: duplicateProductId, workspaceId: getWorkspaceId(req), datasetStatus: "active" })
     ]);
 
     if (!master || !duplicate) {
@@ -187,7 +187,8 @@ productRouter.post("/", requireApiKey, requireAuth(["admin"]), async (req, res, 
       basePrice: req.body.basePrice,
       cost: req.body.cost,
       inventory: req.body.inventory,
-      workspaceId: getWorkspaceId(req)
+      workspaceId: getWorkspaceId(req),
+      datasetStatus: "active"
     });
     await logAudit(req, {
       action: "product.created",
@@ -211,7 +212,7 @@ productRouter.get("/:productId/sales", async (req, res, next) => {
     const requestedLimit = Number.parseInt(req.query.limit || "100", 10);
     const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 100, 1), 500);
     const skip = (page - 1) * limit;
-    const query = workspaceFilter(req, { productId: req.params.productId });
+    const query = workspaceFilter(req, { productId: req.params.productId, datasetStatus: "active" });
     const sales = await SalesData.find(query)
       .sort({ date: 1, customerSegment: 1 })
       .skip(skip)

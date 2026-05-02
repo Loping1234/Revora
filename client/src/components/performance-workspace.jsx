@@ -53,6 +53,7 @@ import {
   TrustBadge,
   WarningPanel
 } from "./common";
+import { RevenueTrendChart } from "./charts";
 
 export function DashboardPanel({ dashboardData, dashboardState, dashboardMessage, currency, refreshDashboard }) {
   const metrics = dashboardData?.metrics || {};
@@ -130,7 +131,7 @@ export function DashboardPanel({ dashboardData, dashboardState, dashboardMessage
         <section className="max-h-[460px] min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4">
           <h3 className="text-base font-semibold">Revenue Movement</h3>
           <div className="mt-4">
-            <HorizontalBars items={trend} labelKey="month" valueKey="revenue" valueFormatter={(value) => formatCurrency(value, currency)} emptyText="No monthly trend available yet." />
+            <RevenueTrendChart data={trend} dataKey="revenue" currency={currency} />
           </div>
         </section>
       </div>

@@ -118,6 +118,14 @@ async function resolveApiProduct({ workspaceId, sku, externalProductId, productN
 
 ingestRouter.post("/sales", async (req, res, next) => {
   try {
+    return res.status(409).json({
+      success: false,
+      error: {
+        message: "Direct sales ingestion is disabled. Use /upload/sales/preview and /upload/sales/stage so data can pass quality review before it affects pricing models.",
+        statusCode: 409
+      }
+    });
+
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
     const source = String(req.body?.source || "api-ingest").trim() || "api-ingest";
     const workspaceId = getWorkspaceId(req);

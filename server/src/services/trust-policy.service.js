@@ -40,12 +40,17 @@ export function assessModelEvidence(model = {}) {
   if (backtest.available && Number(backtest.worstErrorPercent || 0) > 20) {
     reasons.push(`Backtest error is above the strong evidence threshold (${round(backtest.worstErrorPercent, 1)}%).`);
   }
+  if (backtest.available && backtest.modelBeatsBaseline === false) {
+    reasons.push("Model did not outperform a simple Average Demand baseline on held-out data.");
+  }
 
+  const baselineOk = !backtest.available || backtest.modelBeatsBaseline !== false;
   const coreEvidencePasses = groupedDemandPoints >= 10
     && distinctPriceCount >= 3
     && normalResponse
     && rSquared >= 0.7
-    && dataFitnessLabel === "Model usable";
+    && dataFitnessLabel === "Model usable"
+    && baselineOk;
   const backtestStrong = backtest.available && Number(backtest.worstErrorPercent || 0) <= 20;
 
   let label = "Weak";
@@ -60,6 +65,7 @@ export function assessModelEvidence(model = {}) {
     && rSquared >= 0.35
     && dataFitnessLabel !== "Recommendation blocked"
     && (!backtest.available || Number(backtest.worstErrorPercent || 0) <= 35)
+    && baselineOk
   ) {
     label = "Usable";
   }

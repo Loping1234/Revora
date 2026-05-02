@@ -9,6 +9,20 @@ const productSchema = new mongoose.Schema(
       default: DEFAULT_WORKSPACE_ID,
       index: true
     },
+    datasetStatus: {
+      type: String,
+      enum: ["active", "archived"],
+      required: true,
+      default: "active",
+      index: true
+    },
+    archivedAt: Date,
+    archiveReason: String,
+    sourceImportBatchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ImportBatch",
+      index: true
+    },
     name: {
       type: String,
       required: true,
@@ -82,6 +96,7 @@ function normalizeProductKey(value) {
 productSchema.index({ workspaceId: 1, normalizedSku: 1 });
 productSchema.index({ workspaceId: 1, normalizedName: 1 });
 productSchema.index({ workspaceId: 1, category: 1, name: 1 });
+productSchema.index({ workspaceId: 1, datasetStatus: 1 });
 
 productSchema.pre("save", function normalizeIdentity(next) {
   this.normalizedSku = normalizeProductKey(this.sku);

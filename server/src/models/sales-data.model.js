@@ -9,6 +9,25 @@ const salesDataSchema = new mongoose.Schema(
       default: DEFAULT_WORKSPACE_ID,
       index: true
     },
+    datasetStatus: {
+      type: String,
+      enum: ["active", "archived"],
+      required: true,
+      default: "active",
+      index: true
+    },
+    archivedAt: Date,
+    archiveReason: String,
+    sourceImportBatchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ImportBatch",
+      index: true
+    },
+    excludedFromModel: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
@@ -108,9 +127,7 @@ const salesDataSchema = new mongoose.Schema(
     },
     rowFingerprint: {
       type: String,
-      index: true,
-      unique: true,
-      sparse: true
+      index: true
     },
     importBatchId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -135,6 +152,8 @@ salesDataSchema.index({ productId: 1, customerSegment: 1, stockoutFlag: 1, inven
 salesDataSchema.index({ "importMeta.source": 1, "importMeta.rowNumber": 1 });
 salesDataSchema.index({ workspaceId: 1, productId: 1, date: 1, customerSegment: 1, price: 1 });
 salesDataSchema.index({ workspaceId: 1, importBatchId: 1 });
+salesDataSchema.index({ workspaceId: 1, datasetStatus: 1, importBatchId: 1 });
+salesDataSchema.index({ workspaceId: 1, datasetStatus: 1, excludedFromModel: 1 });
 salesDataSchema.index({ workspaceId: 1, date: 1 });
 salesDataSchema.index({ workspaceId: 1, customerSegment: 1 });
 

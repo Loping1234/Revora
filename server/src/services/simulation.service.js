@@ -199,13 +199,13 @@ export async function simulatePrice({ productId, price, competitorPrice, segment
     throw new Error("competitorPrice must be a non-negative number");
   }
 
-  const product = await Product.findById(productId).lean();
+  const product = await Product.findOne({ _id: productId, datasetStatus: "active" }).lean();
 
   if (!product) {
     throw new Error("Product not found");
   }
 
-  let model = await DemandModel.findOne({ productId, segment }).lean();
+  let model = await DemandModel.findOne({ productId, segment, datasetStatus: "active" }).lean();
   const activeImportBatchId = await getActiveImportBatchId();
   const modelImportBatchId = model?.activeImportBatchId ? String(model.activeImportBatchId) : null;
   let modelCreated = false;

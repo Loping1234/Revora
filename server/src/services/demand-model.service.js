@@ -571,12 +571,13 @@ export async function getInsightSummary({ productId, segment = "all" }) {
   const query = {
     productId: typeof productId === "string" ? new mongoose.Types.ObjectId(productId) : productId,
     ...(segment !== "all" && { customerSegment: segment }),
+    excludedFromModel: { $ne: true },
     ...activeImportBatchFilter
   };
   const [summary, groupedRecords, product] = await Promise.all([
     getSalesSummaryMetrics(query),
     getGroupedDemandRecords(query),
-    Product.findById(productId).lean()
+    Product.findOne({ _id: productId, datasetStatus: "active" }).lean()
   ]);
   const distinctPriceCount = new Set(groupedRecords.map((record) => Number(record.price).toFixed(4))).size;
   const canFitModel = groupedRecords.length >= 3 && distinctPriceCount >= 2;
@@ -1087,6 +1088,69 @@ function selectDemandModel(records) {
   return selected;
 }
 
+export function evaluateBaselineAccuracy(trainRecords, testRecords) {
+  if (!trainRecords.length || !testRecords.length) {
+    return { available: false };
+  }
+
+  const actualDemand = testRecords.map((record) => Number(record.quantity || 0));
+  const actualRevenue = testRecords.map((record) => Number(record.revenue ?? record.price * record.quantity ?? 0));
+
+  // Baseline 1: Mean Demand — always predict the average demand from training set
+  const trainMeanDemand = trainRecords.reduce((total, record) => total + Number(record.quantity || 0), 0) / trainRecords.length;
+  const meanPredictions = testRecords.map(() => trainMeanDemand);
+  const meanRevenuePredictions = testRecords.map((record) => Number(record.price || 0) * trainMeanDemand);
+
+  // Baseline 2: Last-Value — always predict the demand of the most recent training point
+  const lastTrainDemand = Number(trainRecords[trainRecords.length - 1].quantity || 0);
+  const lastValuePredictions = testRecords.map(() => lastTrainDemand);
+  const lastValueRevenuePredictions = testRecords.map((record) => Number(record.price || 0) * lastTrainDemand);
+
+  // Baseline 3: Moving Average — average of last 3 training demand points
+  const windowSize = Math.min(3, trainRecords.length);
+  const recentRecords = trainRecords.slice(-windowSize);
+  const movingAvgDemand = recentRecords.reduce((total, record) => total + Number(record.quantity || 0), 0) / windowSize;
+  const movingAvgPredictions = testRecords.map(() => movingAvgDemand);
+  const movingAvgRevenuePredictions = testRecords.map((record) => Number(record.price || 0) * movingAvgDemand);
+
+  const baselines = [
+    {
+      name: "mean_demand",
+      label: "Average Demand",
+      description: "Always predicts the average demand from the training set.",
+      demandMAE: meanAbsolute(actualDemand.map((actual, index) => actual - meanPredictions[index])),
+      demandMAPE: meanAbsolutePercent(actualDemand, meanPredictions),
+      revenueMAPE: meanAbsolutePercent(actualRevenue, meanRevenuePredictions)
+    },
+    {
+      name: "last_value",
+      label: "Last Observation",
+      description: "Always predicts the demand of the most recent training point.",
+      demandMAE: meanAbsolute(actualDemand.map((actual, index) => actual - lastValuePredictions[index])),
+      demandMAPE: meanAbsolutePercent(actualDemand, lastValuePredictions),
+      revenueMAPE: meanAbsolutePercent(actualRevenue, lastValueRevenuePredictions)
+    },
+    {
+      name: "moving_average_3",
+      label: "3-Point Moving Average",
+      description: "Predicts the average of the last 3 training demand points.",
+      demandMAE: meanAbsolute(actualDemand.map((actual, index) => actual - movingAvgPredictions[index])),
+      demandMAPE: meanAbsolutePercent(actualDemand, movingAvgPredictions),
+      revenueMAPE: meanAbsolutePercent(actualRevenue, movingAvgRevenuePredictions)
+    }
+  ];
+
+  const best = baselines.reduce((current, baseline) => baseline.demandMAPE < current.demandMAPE ? baseline : current, baselines[0]);
+
+  return {
+    available: true,
+    baselines,
+    bestBaselineMAPE: best.demandMAPE,
+    bestBaselineName: best.name,
+    bestBaselineLabel: best.label
+  };
+}
+
 function evaluateHoldoutAccuracy(records) {
   const sortedRecords = [...records].sort((left, right) => new Date(left.date) - new Date(right.date));
   const testSize = Math.max(2, Math.ceil(sortedRecords.length * 0.2));
@@ -1110,6 +1174,18 @@ function evaluateHoldoutAccuracy(records) {
     const predictedProfit = testRecords.map((record, index) => (Number(record.price || 0) - Number(record.cost || 0)) * predictedDemand[index]);
     const actualProfit = testRecords.map((record) => Number(record.revenue ?? record.price * record.quantity ?? 0) - Number(record.cost || 0) * Number(record.quantity || 0));
 
+    const modelDemandMAPE = meanAbsolutePercent(actualDemand, predictedDemand);
+    const baselineResult = evaluateBaselineAccuracy(trainRecords, testRecords);
+    const baselineComparison = baselineResult.available
+      ? {
+          ...baselineResult,
+          modelBeatsBaseline: modelDemandMAPE <= baselineResult.bestBaselineMAPE,
+          improvementPercent: baselineResult.bestBaselineMAPE > 0
+            ? Number(((1 - modelDemandMAPE / baselineResult.bestBaselineMAPE) * 100).toFixed(1))
+            : 0
+        }
+      : { available: false };
+
     return {
       available: true,
       method: "time-based holdout",
@@ -1119,11 +1195,12 @@ function evaluateHoldoutAccuracy(records) {
       testStartDate: testRecords[0]?.date,
       testEndDate: testRecords[testRecords.length - 1]?.date,
       demandMAE: meanAbsolute(actualDemand.map((actual, index) => actual - predictedDemand[index])),
-      demandMAPE: meanAbsolutePercent(actualDemand, predictedDemand),
+      demandMAPE: modelDemandMAPE,
       revenueMAE: meanAbsolute(actualRevenue.map((actual, index) => actual - predictedRevenue[index])),
       revenueMAPE: meanAbsolutePercent(actualRevenue, predictedRevenue),
       profitMAE: meanAbsolute(actualProfit.map((actual, index) => actual - predictedProfit[index])),
       profitMAPE: meanAbsolutePercent(actualProfit, predictedProfit),
+      baselineComparison,
       samplePredictions: testRecords.slice(0, 5).map((record, index) => ({
         date: record.date,
         price: record.price,
@@ -1150,12 +1227,13 @@ export async function fitDemandModel({ productId, segment = "all" }) {
   const query = {
     productId: typeof productId === "string" ? new mongoose.Types.ObjectId(productId) : productId,
     ...(segment !== "all" && { customerSegment: segment }),
+    excludedFromModel: { $ne: true },
     ...activeImportBatchFilter
   };
   const [summary, groupedRecords, product] = await Promise.all([
     getSalesSummaryMetrics(query),
     getGroupedDemandRecords(query),
-    Product.findById(productId).lean()
+    Product.findOne({ _id: productId, datasetStatus: "active" }).lean()
   ]);
   const rawRows = summary.rawRows || 0;
   const usableRows = summary.usableRows || 0;
@@ -1185,6 +1263,12 @@ export async function fitDemandModel({ productId, segment = "all" }) {
   const accuracyMetrics = evaluateHoldoutAccuracy(groupedRecords);
   const modelWarnings = [];
 
+  if (accuracyMetrics.baselineComparison?.available && !accuracyMetrics.baselineComparison.modelBeatsBaseline) {
+    modelWarnings.push(
+      `The fitted model did not outperform a simple ${accuracyMetrics.baselineComparison.bestBaselineLabel || "Average Demand"} baseline on held-out data. Recommendations from this model should be treated with extra caution.`
+    );
+  }
+
   if (excludedRows > 0) {
     modelWarnings.push(`${excludedRows} stockout row${excludedRows === 1 ? "" : "s"} excluded because low sales may be caused by no stock.`);
   }
@@ -1202,9 +1286,30 @@ export async function fitDemandModel({ productId, segment = "all" }) {
   }
 
   const coefficients = selectDemandModel(groupedRecords);
+
+  const demandCurvePoints = groupedRecords.slice(0, 50).map((record) => ({
+    price: Number(record.price),
+    actualDemand: Number(record.quantity),
+    predictedDemand: Math.max(0, predictDemandFromModel(coefficients, record.price, record))
+  }));
+
+  const curveSteps = 20;
+  const curveMinPrice = trainingSummary.priceRangeMin || Math.min(...groupedRecords.map((r) => r.price));
+  const curveMaxPrice = trainingSummary.priceRangeMax || Math.max(...groupedRecords.map((r) => r.price));
+  const curveStep = curveMaxPrice > curveMinPrice ? (curveMaxPrice - curveMinPrice) / (curveSteps - 1) : 1;
+  const fittedCurvePoints = Array.from({ length: curveSteps }, (_, i) => {
+    const price = curveMinPrice + i * curveStep;
+    return {
+      price: Number(price.toFixed(2)),
+      predictedDemand: Math.max(0, predictDemandFromModel(coefficients, price))
+    };
+  });
+
   coefficients.modelComparison = {
     ...(coefficients.modelComparison || {}),
     accuracyMetrics,
+    demandCurvePoints,
+    fittedCurvePoints,
     readinessLevel: readinessGate.readinessLevel,
     mlReadiness: readinessGate.mlReadiness
   };
@@ -1300,6 +1405,8 @@ export async function fitDemandModel({ productId, segment = "all" }) {
       ...evidenceReliability,
       aggregationSummary,
       activeImportBatchId: activeImportBatchFilter.importBatchId || null,
+      datasetStatus: "active",
+      sourceImportBatchId: activeImportBatchFilter.importBatchId || null,
       dataFitnessScore: dataFitness.dataFitnessScore,
       dataFitnessLabel: dataFitness.dataFitnessLabel,
       businessRiskLevel: dataFitness.businessRiskLevel,

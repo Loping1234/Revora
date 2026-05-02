@@ -20,7 +20,7 @@ import { uploadRouter } from "./routes/upload.routes.js";
 
 export const app = express();
 
-app.use(cors({ origin: env.corsOrigin }));
+app.use(cors({ origin: env.corsOrigin.split(",") }));
 app.use(express.json());
 app.use(morgan(env.nodeEnv === "production" ? "combined" : "dev"));
 
@@ -42,7 +42,7 @@ app.use("/products", requireApiKey, requireAuth(["admin", "analyst", "manager"])
 app.use("/recommendations", requireApiKey, requireAuth(["admin", "analyst", "manager"]), recommendationRouter);
 app.use("/reports", requireApiKey, requireAuth(["admin", "analyst", "manager"]), reportRouter);
 app.use("/settings", requireApiKey, requireAuth(["admin", "analyst", "manager"]), settingsRouter);
-app.use("/upload", requireApiKey, requireAuth(["admin"]), uploadRouter);
+app.use("/upload", requireApiKey, requireAuth(["admin", "analyst", "manager"]), uploadRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

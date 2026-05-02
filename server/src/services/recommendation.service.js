@@ -217,7 +217,8 @@ function optimizePrice({ product, model, minPrice, maxPrice, competitorPrice, ob
 async function getRelatedProductWarnings(product) {
   const relatedProducts = await Product.find({
     _id: { $ne: product._id },
-    category: product.category
+    category: product.category,
+    datasetStatus: "active"
   }).limit(5).lean();
 
   if (!relatedProducts.length) return [];
@@ -236,13 +237,13 @@ export async function recommendPrice({ productId, segment = "all", objective = "
     throw new Error("objective must be profit, revenue, clear_inventory, or match_competitor");
   }
 
-  const product = await Product.findById(productId).lean();
+  const product = await Product.findOne({ _id: productId, datasetStatus: "active" }).lean();
 
   if (!product) {
     throw new Error("Product not found");
   }
 
-  let model = await DemandModel.findOne({ productId, segment }).lean();
+  let model = await DemandModel.findOne({ productId, segment, datasetStatus: "active" }).lean();
   const activeImportBatchId = await getActiveImportBatchId();
   const modelImportBatchId = model?.activeImportBatchId ? String(model.activeImportBatchId) : null;
 
@@ -441,6 +442,8 @@ export async function recommendPrice({ productId, segment = "all", objective = "
 
   const recommendationPayload = {
     workspaceId,
+    datasetStatus: "active",
+    sourceImportBatchId: activeImportBatchId || undefined,
     productId,
     segment,
     objective: effectiveObjective,

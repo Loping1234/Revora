@@ -30,7 +30,7 @@ modelRouter.post("/fit-model", requireApiKey, requireAuth(["admin", "analyst"]),
       });
     }
 
-    const product = await Product.findOne(workspaceFilter(req, { _id: productId })).lean();
+    const product = await Product.findOne(workspaceFilter(req, { _id: productId, datasetStatus: "active" })).lean();
 
     if (!product) {
       return res.status(404).json({
@@ -68,7 +68,7 @@ modelRouter.post("/fit-model", requireApiKey, requireAuth(["admin", "analyst"]),
     });
   } catch (error) {
     if (error.insightSummary && req.body?.productId && mongoose.Types.ObjectId.isValid(req.body.productId)) {
-      const product = await Product.findOne(workspaceFilter(req, { _id: req.body.productId })).lean();
+      const product = await Product.findOne(workspaceFilter(req, { _id: req.body.productId, datasetStatus: "active" })).lean();
       return res.json({
         success: true,
         data: {
@@ -92,7 +92,7 @@ modelRouter.post("/fit-model", requireApiKey, requireAuth(["admin", "analyst"]),
 
 modelRouter.get("/models", requireApiKey, requireAuth(["admin", "analyst"]), async (req, res, next) => {
   try {
-    const query = workspaceFilter(req);
+    const query = workspaceFilter(req, { datasetStatus: "active" });
 
     if (req.query.productId) {
       if (!mongoose.Types.ObjectId.isValid(req.query.productId)) {
@@ -130,7 +130,7 @@ modelRouter.get("/models/compare", requireApiKey, requireAuth(["admin", "analyst
       });
     }
 
-    const product = await Product.findOne(workspaceFilter(req, { _id: productId })).lean();
+    const product = await Product.findOne(workspaceFilter(req, { _id: productId, datasetStatus: "active" })).lean();
 
     if (!product) {
       return res.status(404).json({
@@ -189,7 +189,7 @@ modelRouter.post("/simulate", requireApiKey, requireAuth(["admin", "analyst"]), 
       });
     }
 
-    const product = await Product.findOne(workspaceFilter(req, { _id: productId })).lean();
+    const product = await Product.findOne(workspaceFilter(req, { _id: productId, datasetStatus: "active" })).lean();
     if (!product) {
       return res.status(404).json({
         success: false,
