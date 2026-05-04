@@ -1,4 +1,6 @@
 import {
+  BrainCircuit,
+  BotMessageSquare,
   FileDown,
   Home,
   LineChart,
@@ -11,6 +13,7 @@ import {
 
 export const sidebarItems = [
   { id: "home", label: "Home", description: "Executive snapshot of revenue, readiness, and next actions.", icon: Home, status: "ready" },
+  { id: "pricingAssistant", label: "Pricing Assistant", description: "Capture shopkeeper pricing decisions through a simple chat-style assistant.", icon: BotMessageSquare, status: "ready" },
   { id: "dataWorkspace", label: "Sales Data", description: "Upload CSV files, review data quality, and control the active dataset.", icon: Upload, status: "ready" },
   { id: "productsWorkspace", label: "Products", description: "Manage product readiness, pricing context, customer groups, and market signals.", icon: Package, status: "ready" },
   { id: "modelsWorkspace", label: "Pricing Insights", description: "Create trusted price-response insights from model-ready product groups.", icon: TrendingUp, status: "ready" },
@@ -19,6 +22,15 @@ export const sidebarItems = [
   { id: "exports", label: "Reports & Export", description: "Download examiner-ready reports with assumptions, formulas, and limitations.", icon: FileDown, status: "ready" },
   { id: "settings", label: "Settings", description: "Configure branding, currency, report defaults, access, and demo controls.", icon: Settings, status: "ready" }
 ];
+
+export const mlSidebarItems = [
+  { id: "mlDecisionSpace", label: "ML Decision Space", description: "Review the trained decision-quality assistant and model evidence.", icon: BrainCircuit, status: "ready" },
+  { id: "pricingAssistant", label: "Pricing Assistant", description: "Capture shopkeeper pricing decisions through a simple chat-style assistant.", icon: BotMessageSquare, status: "ready" },
+  { id: "exports", label: "Reports & Export", description: "Download examiner-ready reports with assumptions, formulas, and limitations.", icon: FileDown, status: "ready" },
+  { id: "settings", label: "Settings", description: "Configure branding, currency, report defaults, access, and demo controls.", icon: Settings, status: "ready" }
+];
+
+export const allSidebarItems = [...sidebarItems, ...mlSidebarItems.filter((item) => !sidebarItems.some((existing) => existing.id === item.id))];
 
 export const objectiveOptions = [
   { value: "profit", label: "Best profit" },

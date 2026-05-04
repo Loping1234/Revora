@@ -8,7 +8,7 @@
     "client"
   ],
   "scripts": {
-    "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev": "concurrently -n server,client,flask -c cyan,magenta,yellow \"npm run dev -w server\" \"npm run dev -w client\" \"cd python_service && python app.py\"",
     "dev:server": "npm run dev -w server",
     "dev:client": "npm run dev -w client",
     "seed": "npm run seed -w server",
@@ -19,6 +19,8 @@
     "test:trust": "node server/src/test/trust-policy.test.mjs",
     "test:quality-gate": "node server/src/test/data-quality-gate.test.mjs",
     "test:reliability": "npm run test:matching && npm run test:fitness && npm run test:trust && npm run test:quality-gate",
+    "ml:train": "python scripts/ml_decision_pipeline.py",
+    "test:ml-pipeline": "python scripts/ml_decision_pipeline.py --self-test",
     "smoke": "node scripts/smoke-test.mjs"
   },
   "devDependencies": {

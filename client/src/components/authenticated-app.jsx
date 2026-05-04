@@ -8,6 +8,7 @@ import {
   downloadRecommendationReport,
   downloadReport,
   fitDemandModel,
+  getAssistantDecisions,
   getCompetitorMarket,
   getCustomerSegments,
   getDashboardSummary,
@@ -15,6 +16,7 @@ import {
   getHealthStatus,
   getImportBatchReview,
   getInsightReadiness,
+  getMlDecisionSummary,
   getProductDuplicates,
   getProductIntelligence,
   getProductRelationships,
@@ -24,7 +26,12 @@ import {
   getSeasonalitySummary,
   getWorkspaceSettings,
   mergeProducts,
+  parseAssistantDecision,
+  confirmAssistantDecision,
+  getUnresolvedAssistantDecision,
+  resolveAssistantDecision,
   planScenarios,
+  predictMlDecisionQuality,
   previewSalesCsv,
   rejectImportBatch,
   resetWorkspaceData,
@@ -34,7 +41,7 @@ import {
   updateWorkspaceSettings,
   uploadSalesCsv
 } from "../lib/api";
-import { defaultSettings, getObjectiveLabel, objectiveOptions, sidebarItems } from "../config/navigation";
+import { allSidebarItems, defaultSettings, getObjectiveLabel, mlSidebarItems, objectiveOptions, sidebarItems } from "../config/navigation";
 import { formatSegmentName } from "../utils/formatters";
 import { StatusPill } from "./common";
 import {
@@ -45,7 +52,9 @@ import {
   HistoryPanel,
   HomeOverview,
   AppShell,
+  MlDecisionSpacePanel,
   PlaceholderPanel,
+  PricingAssistantPanel,
   PriceSimulatorPanel,
   PricingInsightsPanel,
   ProductIntelligencePanel,
@@ -65,6 +74,7 @@ import {
 
 export function AuthenticatedApp({ session, onLogout }) {
   const [activePanel, setActivePanel] = useState("home");
+  const [workspaceMode, setWorkspaceMode] = useState("math");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [health, setHealth] = useState(null);
   const [products, setProducts] = useState([]);
@@ -148,10 +158,49 @@ export function AuthenticatedApp({ session, onLogout }) {
   const [recommendationPerformance, setRecommendationPerformance] = useState(null);
   const [recommendationPerformanceState, setRecommendationPerformanceState] = useState("idle");
   const [recommendationPerformanceMessage, setRecommendationPerformanceMessage] = useState("");
+  const [mlDecisionSummary, setMlDecisionSummary] = useState(null);
+  const [mlDecisionState, setMlDecisionState] = useState("idle");
+  const [mlDecisionMessage, setMlDecisionMessage] = useState("");
+  const [mlDecisionForm, setMlDecisionForm] = useState({
+    currentPrice: "120",
+    previousPrice: "100",
+    quantitySold: "80",
+    unitsBeforeChange: "70",
+    revenueBeforeChange: "7000",
+    profitBeforeChange: "2500",
+    competitorPrice: "115",
+    discountPercent: "5",
+    inventoryLevel: "400",
+    holidayFlag: false,
+    category: "Electronics",
+    customerSegment: "Retail",
+    region: "North"
+  });
+  const [mlPrediction, setMlPrediction] = useState(null);
+  const [mlPredictionState, setMlPredictionState] = useState("idle");
+  const [mlPredictionMessage, setMlPredictionMessage] = useState("");
+  const [assistantInput, setAssistantInput] = useState("");
+  const [chatHistory, setChatHistory] = useState([
+    { role: "assistant", text: "Hi! Tell me about a recent price change you made." }
+  ]);
+  const [assistantDecisions, setAssistantDecisions] = useState([]);
+  const [latestAssistantDecision, setLatestAssistantDecision] = useState(null);
+  const [draftDecision, setDraftDecision] = useState(null);
+  const [currentParseDraft, setCurrentParseDraft] = useState(null);
+  const [unresolvedDecision, setUnresolvedDecision] = useState(null);
+  const [assistantState, setAssistantState] = useState("idle");
+  const [assistantMessage, setAssistantMessage] = useState("");
 
-  const activeItem = sidebarItems.find((item) => item.id === activePanel) || sidebarItems[0];
+  const visibleSidebarItems = workspaceMode === "ml" ? mlSidebarItems : sidebarItems;
+  const activeItem = allSidebarItems.find((item) => item.id === activePanel) || visibleSidebarItems[0] || sidebarItems[0];
   const currency = settings.currency || "USD";
   const canCommitImport = ["admin", "manager"].includes(session?.user?.role);
+
+  function handleWorkspaceModeChange(nextMode) {
+    setWorkspaceMode(nextMode);
+    setActivePanel(nextMode === "ml" ? "mlDecisionSpace" : "home");
+    setIsSidebarOpen(false);
+  }
 
   async function refreshProducts() {
     const payload = await getProducts();
@@ -341,6 +390,156 @@ export function AuthenticatedApp({ session, onLogout }) {
     }
   }
 
+  async function refreshAssistantHistory() {
+    setAssistantState((current) => (current === "running" ? current : "loading"));
+    setAssistantMessage((current) => current || "Loading assistant decision history.");
+
+    try {
+      const payload = await getAssistantDecisions(25);
+      setAssistantDecisions(payload.data || []);
+      setAssistantState("success");
+      setAssistantMessage("");
+    } catch (err) {
+      setAssistantState("error");
+      setAssistantMessage(err.message);
+    }
+  }
+
+  useEffect(() => {
+    if (activePanel === "pricingAssistant" || activePanel === "mlDecisionSpace") {
+      getUnresolvedAssistantDecision()
+        .then((payload) => {
+          if (payload.data) {
+            setUnresolvedDecision(payload.data);
+            const hoursAgo = Math.max(1, Math.round((Date.now() - new Date(payload.data.createdAt).getTime()) / 3600000));
+            setChatHistory([
+              { 
+                role: "assistant", 
+                text: `Welcome back! About ${hoursAgo} hours ago, you recorded a decision for ${payload.data.product}. How did that go today?` 
+              }
+            ]);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [activePanel]);
+
+  async function handleAssistantSubmit(event) {
+    event.preventDefault();
+    if (!assistantInput.trim()) return;
+
+    const newUserMessage = { role: "user", text: assistantInput };
+    const newHistory = [...chatHistory, newUserMessage];
+    setChatHistory(newHistory);
+    setAssistantInput("");
+
+    setAssistantState("running");
+    setAssistantMessage("");
+
+    try {
+      if (unresolvedDecision) {
+        // We are currently answering a feedback loop question
+        const payload = await resolveAssistantDecision(unresolvedDecision._id, newUserMessage.text);
+        setUnresolvedDecision(null);
+        setChatHistory(curr => [...curr, { role: "assistant", text: "Got it, I've updated your dataset with this outcome. What else would you like to record?" }]);
+        setAssistantState("success");
+        return;
+      }
+
+      // Send only the new input, plus the draft we've built so far
+      const payload = await parseAssistantDecision(assistantInput, currentParseDraft);
+      const draft = payload.data;
+      
+      let botResponseText = "";
+      if (draft.missingFields && draft.missingFields.length > 0) {
+        botResponseText = `Got it. To give you good advice, I still need: ${draft.missingFields.join(", ")}. Can you provide that?`;
+        setLatestAssistantDecision(null);
+        setCurrentParseDraft(draft); // Save progress
+        setChatHistory(curr => [...curr, { role: "assistant", text: botResponseText }]);
+      } else {
+        // Stage 1: Trigger the Confirmation Card instead of saving
+        setDraftDecision(draft);
+        setCurrentParseDraft(null); // Clear progress
+      }
+
+      setAssistantState("success");
+      setAssistantMessage("");
+    } catch (err) {
+      setAssistantState("error");
+      setAssistantMessage(err.message);
+      setChatHistory(curr => [...curr, { role: "assistant", text: err.message }]);
+    }
+  }
+
+  async function handleConfirmDecision(isConfirmed) {
+    if (!isConfirmed) {
+      setDraftDecision(null);
+      setChatHistory(curr => [...curr, { role: "assistant", text: "No problem. Let's try again. What did you change?" }]);
+      return;
+    }
+
+    setAssistantState("running");
+    try {
+      const payload = await confirmAssistantDecision(draftDecision);
+      const decision = payload.data;
+      
+      setLatestAssistantDecision(decision);
+      setAssistantDecisions((current) => [decision, ...current.filter((item) => item._id !== decision._id)].slice(0, 25));
+      setDraftDecision(null);
+      
+      setChatHistory(curr => [...curr, { role: "assistant", text: decision.advice?.recommendation || "Decision captured perfectly." }]);
+      setAssistantState("success");
+    } catch (err) {
+      setAssistantState("error");
+      setAssistantMessage(err.message);
+    }
+  }
+
+  async function handleSnoozeFeedback() {
+    setUnresolvedDecision(null);
+    setChatHistory(curr => [...curr, { role: "assistant", text: "No worries, I'll ask you later. Need to record anything new right now?" }]);
+  }
+
+  function handleResetAssistant() {
+    setChatHistory([{ role: "assistant", text: "Hi! Tell me about a recent price change you made." }]);
+    setAssistantInput("");
+    setLatestAssistantDecision(null);
+    setDraftDecision(null);
+    setCurrentParseDraft(null);
+  }
+
+  async function refreshMlDecisionSummary() {
+    setMlDecisionState("loading");
+    setMlDecisionMessage("Loading offline ML decision-quality evidence.");
+
+    try {
+      const payload = await getMlDecisionSummary();
+      setMlDecisionSummary(payload.data);
+      setMlDecisionState("success");
+      setMlDecisionMessage("");
+    } catch (err) {
+      setMlDecisionState("error");
+      setMlDecisionMessage(err.message);
+    }
+  }
+
+  async function handleMlDecisionPredict(event) {
+    event.preventDefault();
+    setMlPredictionState("loading");
+    setMlPredictionMessage("");
+
+    try {
+      const payload = await predictMlDecisionQuality(mlDecisionForm);
+      setMlPrediction(payload.data);
+      setMlPredictionState("success");
+      setMlPredictionMessage("");
+    } catch (err) {
+      setMlPrediction(null);
+      setMlPredictionState("error");
+      setMlPredictionMessage(err.message);
+    }
+  }
+
   async function handleResetData() {
     const confirmed = window.prompt(
       "Type RESET to delete all imported sales rows, products, pricing insights, and recommendations from this local workspace. Your CSV files will not be deleted."
@@ -472,6 +671,14 @@ export function AuthenticatedApp({ session, onLogout }) {
 
     if (activePanel === "performanceWorkspace") {
       refreshRecommendationPerformance();
+    }
+
+    if (activePanel === "mlDecisionSpace") {
+      refreshMlDecisionSummary();
+    }
+
+    if (activePanel === "pricingAssistant") {
+      refreshAssistantHistory();
     }
   }, [activePanel]);
 
@@ -958,6 +1165,28 @@ export function AuthenticatedApp({ session, onLogout }) {
               )
             }
           ]}
+        />
+      );
+    }
+
+    if (activePanel === "pricingAssistant") {
+      return (
+        <PricingAssistantPanel
+          assistantDecisions={assistantDecisions}
+          assistantInput={assistantInput}
+          assistantMessage={assistantMessage}
+          assistantState={assistantState}
+          chatHistory={chatHistory}
+          currency={currency}
+          draftDecision={draftDecision}
+          handleAssistantSubmit={handleAssistantSubmit}
+          handleConfirmDecision={handleConfirmDecision}
+          handleResetAssistant={handleResetAssistant}
+          handleSnoozeFeedback={handleSnoozeFeedback}
+          latestAssistantDecision={latestAssistantDecision}
+          refreshAssistantHistory={refreshAssistantHistory}
+          setAssistantInput={setAssistantInput}
+          unresolvedDecision={unresolvedDecision}
         />
       );
     }
@@ -1451,6 +1680,23 @@ export function AuthenticatedApp({ session, onLogout }) {
       );
     }
 
+    if (activePanel === "mlDecisionSpace") {
+      return (
+        <MlDecisionSpacePanel
+          form={mlDecisionForm}
+          handlePredict={handleMlDecisionPredict}
+          message={mlDecisionMessage}
+          prediction={mlPrediction}
+          predictionMessage={mlPredictionMessage}
+          predictionState={mlPredictionState}
+          refreshMlSummary={refreshMlDecisionSummary}
+          setForm={setMlDecisionForm}
+          state={mlDecisionState}
+          summary={mlDecisionSummary}
+        />
+      );
+    }
+
     return (
       <SettingsPanel
         settingsForm={settingsForm}
@@ -1465,6 +1711,10 @@ export function AuthenticatedApp({ session, onLogout }) {
     );
   }, [
     activePanel,
+    assistantDecisions,
+    assistantInput,
+    assistantMessage,
+    assistantState,
     currency,
     competitorMarket,
     competitorMarketMessage,
@@ -1486,6 +1736,14 @@ export function AuthenticatedApp({ session, onLogout }) {
     historyState,
     health,
     latestModel,
+    latestAssistantDecision,
+    mlDecisionMessage,
+    mlDecisionForm,
+    mlPrediction,
+    mlPredictionMessage,
+    mlPredictionState,
+    mlDecisionState,
+    mlDecisionSummary,
     modelMessage,
     modelState,
     productDuplicates,
@@ -1560,11 +1818,14 @@ export function AuthenticatedApp({ session, onLogout }) {
       health={health}
       isSidebarOpen={isSidebarOpen}
       onLogout={onLogout}
+      onWorkspaceModeChange={handleWorkspaceModeChange}
       session={session}
       setActivePanel={setActivePanel}
       setIsSidebarOpen={setIsSidebarOpen}
+      sidebarItems={visibleSidebarItems}
       settings={settings}
       status={status}
+      workspaceMode={workspaceMode}
     >
       {panelContent}
     </AppShell>

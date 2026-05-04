@@ -444,6 +444,80 @@ export async function getProductRelationships() {
   return response.json();
 }
 
+export async function getMlDecisionSummary() {
+  const response = await fetch(`${API_BASE_URL}/ml/decision-quality/summary`, {
+    headers: apiHeaders()
+  });
+
+  return assertOk(response, `ML decision summary failed with status ${response.status}`);
+}
+
+export async function getAssistantDecisions(limit = 25) {
+  const url = new URL(`${API_BASE_URL}/assistant/decisions`);
+  url.searchParams.set("limit", String(limit));
+  const response = await fetch(url, {
+    headers: apiHeaders()
+  });
+
+  return assertOk(response, `Assistant decision history failed with status ${response.status}`);
+}
+
+export async function parseAssistantDecision(message, existingDraft = null) {
+  const response = await fetch(`${API_BASE_URL}/assistant/parse-decision`, {
+    method: "POST",
+    headers: apiHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({ message, existingDraft })
+  });
+
+  return assertOk(response, `Assistant decision parse failed with status ${response.status}`);
+}
+
+export async function confirmAssistantDecision(draftData) {
+  const response = await fetch(`${API_BASE_URL}/assistant/confirm`, {
+    method: "POST",
+    headers: apiHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({ draftData })
+  });
+
+  return assertOk(response, `Assistant decision confirmation failed with status ${response.status}`);
+}
+
+export async function getUnresolvedAssistantDecision() {
+  const response = await fetch(`${API_BASE_URL}/assistant/unresolved`, {
+    headers: apiHeaders()
+  });
+
+  return assertOk(response, `Fetching unresolved decision failed with status ${response.status}`);
+}
+
+export async function resolveAssistantDecision(id, outcome) {
+  const response = await fetch(`${API_BASE_URL}/assistant/resolve/${id}`, {
+    method: "PUT",
+    headers: apiHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({ outcome })
+  });
+
+  return assertOk(response, `Resolving decision failed with status ${response.status}`);
+}
+
+export async function predictMlDecisionQuality(decision) {
+  const response = await fetch(`${API_BASE_URL}/ml/decision-quality/predict`, {
+    method: "POST",
+    headers: apiHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(decision)
+  });
+
+  return assertOk(response, `ML decision prediction failed with status ${response.status}`);
+}
+
 export async function compareModels({ productId, segment = "all" }) {
   const url = new URL(`${API_BASE_URL}/models/compare`);
   url.searchParams.set("productId", productId);

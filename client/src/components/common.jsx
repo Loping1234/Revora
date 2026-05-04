@@ -1,5 +1,6 @@
 import { Component } from "react";
 import { formatCurrency } from "../utils/formatters";
+import { AlertTriangle, Info } from "lucide-react";
 import { useViewMode } from "../lib/view-mode";
 
 function trustTone(label) {
@@ -251,12 +252,15 @@ export function WarningPanel({ warnings, title = "Use with care" }) {
   if (!warnings?.length) return null;
 
   return (
-    <div className="rounded-lg border border-rose-200 bg-rose-50 p-4">
-      <p className="text-sm font-medium text-rose-900">{title}</p>
-      <div className="mt-2 grid gap-1 text-sm text-rose-800">
-        {warnings.map((warning) => (
-          <p key={warning}>{warning}</p>
-        ))}
+    <div className="flex gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4">
+      <AlertTriangle className="mt-0.5 shrink-0 text-rose-600" size={18} />
+      <div>
+        <p className="text-sm font-semibold text-rose-900">{title}</p>
+        <div className="mt-1.5 grid gap-1.5 text-sm leading-6 text-rose-800">
+          {warnings.map((warning, index) => (
+            <p key={index}>{warning}</p>
+          ))}
+        </div>
       </div>
     </div>
   );

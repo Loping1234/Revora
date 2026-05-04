@@ -1,5 +1,7 @@
 import {
   BarChart3,
+  BrainCircuit,
+  Calculator,
   CheckCircle2,
   Eye,
   EyeOff,
@@ -18,6 +20,9 @@ import {
 } from "./common";
 
 export function Sidebar({ activePanel, setActivePanel, isOpen, setIsOpen, settings }) {
+  const items = settings.sidebarItems || sidebarItems;
+  const workspaceMode = settings.workspaceMode || "math";
+
   return (
     <aside
       className={`fixed inset-y-0 left-0 z-30 w-72 overflow-y-auto border-r border-slate-200 bg-white px-4 py-5 transition-transform lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:translate-x-0 ${
@@ -44,8 +49,31 @@ export function Sidebar({ activePanel, setActivePanel, isOpen, setIsOpen, settin
         </button>
       </div>
 
+      <div className="mt-5 grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+        <button
+          className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-md text-xs font-semibold ${
+            workspaceMode === "math" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white"
+          }`}
+          onClick={() => settings.onWorkspaceModeChange?.("math")}
+          type="button"
+        >
+          <Calculator size={14} />
+          Math
+        </button>
+        <button
+          className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-md text-xs font-semibold ${
+            workspaceMode === "ml" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white"
+          }`}
+          onClick={() => settings.onWorkspaceModeChange?.("ml")}
+          type="button"
+        >
+          <BrainCircuit size={14} />
+          ML
+        </button>
+      </div>
+
       <nav className="mt-8 grid gap-1">
-        {sidebarItems.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           const isActive = activePanel === item.id;
 
@@ -140,15 +168,31 @@ export function AppShell({
   session,
   setActivePanel,
   setIsSidebarOpen,
+  sidebarItems: visibleSidebarItems,
   settings,
-  status
+  status,
+  workspaceMode = "math",
+  onWorkspaceModeChange
 }) {
+  const modeLabel = workspaceMode === "ml" ? "ML Decision Space" : "Mathematical Pricing Space";
+
   return (
     <main className={`h-screen overflow-hidden bg-slate-50 text-slate-950 ${settings.appearanceMode === "dark" ? "theme-dark" : ""}`}>
       {isSidebarOpen && <div className="fixed inset-0 z-20 bg-slate-950/30 lg:hidden" onClick={() => setIsSidebarOpen(false)} />}
 
       <div className="grid h-screen min-h-0 lg:grid-cols-[288px_1fr]">
-        <Sidebar activePanel={activeItem.id} isOpen={isSidebarOpen} setActivePanel={setActivePanel} setIsOpen={setIsSidebarOpen} settings={settings} />
+        <Sidebar
+          activePanel={activeItem.id}
+          isOpen={isSidebarOpen}
+          setActivePanel={setActivePanel}
+          setIsOpen={setIsSidebarOpen}
+          settings={{
+            ...settings,
+            sidebarItems: visibleSidebarItems,
+            workspaceMode,
+            onWorkspaceModeChange
+          }}
+        />
 
         <section className="flex h-screen min-w-0 flex-col overflow-hidden px-5 py-4 sm:px-8 lg:px-8">
           <header className="shrink-0 border-b border-slate-200 pb-4">
@@ -182,6 +226,18 @@ export function AppShell({
                   <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium capitalize">{session.user.role}</span>
                 </div>
                 <StatusPill state={status} />
+                <button
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                    workspaceMode === "ml"
+                      ? "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                  onClick={() => onWorkspaceModeChange?.(workspaceMode === "ml" ? "math" : "ml")}
+                  type="button"
+                >
+                  {workspaceMode === "ml" ? <BrainCircuit size={13} /> : <Calculator size={13} />}
+                  {modeLabel}
+                </button>
                 <ViewModeToggle />
                 <details className="relative">
                   <summary className="list-none rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
