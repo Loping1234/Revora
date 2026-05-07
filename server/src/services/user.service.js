@@ -1,4 +1,5 @@
 import { env } from "../config/env.js";
+import { assertDatabaseConnected } from "../config/db.js";
 import { User } from "../models/user.model.js";
 import { DEFAULT_WORKSPACE_ID } from "../utils/workspace.js";
 import { hashPassword } from "./password.service.js";
@@ -10,6 +11,8 @@ const DEFAULT_USERS = [
 ];
 
 export async function ensureDefaultUsers() {
+  assertDatabaseConnected();
+
   for (const item of DEFAULT_USERS) {
     const existing = await User.findOne({ workspaceId: DEFAULT_WORKSPACE_ID, role: item.role }).lean();
     if (existing) continue;
@@ -26,6 +29,7 @@ export async function ensureDefaultUsers() {
 }
 
 export async function findLoginUser(role) {
+  assertDatabaseConnected();
   await ensureDefaultUsers();
   return User.findOne({ workspaceId: DEFAULT_WORKSPACE_ID, role, active: true });
 }

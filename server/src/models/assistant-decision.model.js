@@ -21,9 +21,17 @@ const assistantDecisionSchema = new mongoose.Schema(
     },
     oldPrice: Number,
     newPrice: Number,
+    currentPrice: Number,
+    cost: Number,
+    competitorPrice: Number,
+    goal: {
+      type: String,
+      trim: true,
+      default: ""
+    },
     priceChangeType: {
       type: String,
-      enum: ["increase", "decrease", "unchanged", "unknown"],
+      enum: ["increase", "decrease", "flat", "unchanged", "unknown"],
       default: "unknown",
       index: true
     },
@@ -58,11 +66,18 @@ const assistantDecisionSchema = new mongoose.Schema(
         default: "caution"
       },
       theoreticalRoot: {
+        economicPrinciple: String,
+        explanation: String,
+        recommendation: String,
+        risk: String,
         title: String,
         concept: String,
         description: String
       },
       historicalPrecedent: {
+        market: String,
+        year: String,
+        what_happened: String,
         summary: String,
         outcome: String,
         lesson: String

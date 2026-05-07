@@ -5,14 +5,16 @@ import { startStagingCleanupScheduler } from "./services/staging-cleanup.service
 import { ensureDefaultUsers } from "./services/user.service.js";
 import { backfillDefaultWorkspace } from "./services/workspace.service.js";
 
-await connectDatabase();
-if (process.env.SKIP_BOOTSTRAP !== "true") {
+const databaseConnected = await connectDatabase();
+if (databaseConnected && process.env.SKIP_BOOTSTRAP !== "true") {
   try {
     await backfillDefaultWorkspace();
     await ensureDefaultUsers();
   } catch (error) {
     console.error(`Startup bootstrap failed: ${error.message}`);
   }
+} else if (!databaseConnected) {
+  console.warn("Startup bootstrap skipped because MongoDB is not connected.");
 }
 startStagingCleanupScheduler();
 

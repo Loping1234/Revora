@@ -5,10 +5,24 @@ import {
   draftAssistantDecision,
   saveConfirmedDecision,
   getUnresolvedDecision,
-  resolveDecision
+  resolveDecision,
+  getAssistantOpeningMessage
 } from "../services/assistant.service.js";
 
 export const assistantRouter = Router();
+
+assistantRouter.get("/opening", async (req, res, next) => {
+  try {
+    res.json({
+      success: true,
+      data: {
+        message: await getAssistantOpeningMessage(req)
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 assistantRouter.get("/decisions", async (req, res, next) => {
   try {
@@ -23,7 +37,9 @@ assistantRouter.get("/decisions", async (req, res, next) => {
 
 assistantRouter.post("/parse-decision", async (req, res, next) => {
   try {
-    const draft = await draftAssistantDecision(req, req.body?.message, req.body?.existingDraft);
+    const draft = await draftAssistantDecision(req, req.body?.message, req.body?.existingDraft, {
+      forceMistral: req.body?.forceMistral === true
+    });
     res.json({
       success: true,
       data: draft

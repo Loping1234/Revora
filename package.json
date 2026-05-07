@@ -17,8 +17,9 @@
     "test:matching": "node server/src/test/product-matching.test.mjs",
     "test:fitness": "node server/src/test/data-fitness.test.mjs",
     "test:trust": "node server/src/test/trust-policy.test.mjs",
+    "test:assistant": "node server/src/test/assistant.test.mjs",
     "test:quality-gate": "node server/src/test/data-quality-gate.test.mjs",
-    "test:reliability": "npm run test:matching && npm run test:fitness && npm run test:trust && npm run test:quality-gate",
+    "test:reliability": "npm run test:matching && npm run test:fitness && npm run test:trust && npm run test:quality-gate && npm run test:assistant",
     "ml:train": "python scripts/ml_decision_pipeline.py",
     "test:ml-pipeline": "python scripts/ml_decision_pipeline.py --self-test",
     "smoke": "node scripts/smoke-test.mjs"

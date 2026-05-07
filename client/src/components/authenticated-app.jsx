@@ -9,6 +9,7 @@ import {
   downloadReport,
   fitDemandModel,
   getAssistantDecisions,
+  getAssistantOpening,
   getCompetitorMarket,
   getCustomerSegments,
   getDashboardSummary,
@@ -180,9 +181,7 @@ export function AuthenticatedApp({ session, onLogout }) {
   const [mlPredictionState, setMlPredictionState] = useState("idle");
   const [mlPredictionMessage, setMlPredictionMessage] = useState("");
   const [assistantInput, setAssistantInput] = useState("");
-  const [chatHistory, setChatHistory] = useState([
-    { role: "assistant", text: "Hi! Tell me about a recent price change you made." }
-  ]);
+  const [chatHistory, setChatHistory] = useState([]);
   const [assistantDecisions, setAssistantDecisions] = useState([]);
   const [latestAssistantDecision, setLatestAssistantDecision] = useState(null);
   const [draftDecision, setDraftDecision] = useState(null);
@@ -190,6 +189,24 @@ export function AuthenticatedApp({ session, onLogout }) {
   const [unresolvedDecision, setUnresolvedDecision] = useState(null);
   const [assistantState, setAssistantState] = useState("idle");
   const [assistantMessage, setAssistantMessage] = useState("");
+  const [assistantModelMode, setAssistantModelMode] = useState(false);
+
+  async function loadAssistantOpening() {
+    setAssistantState((current) => (current === "running" ? current : "loading"));
+    try {
+      const payload = await getAssistantOpening();
+      const text = payload.data?.message;
+      if (text) {
+        setChatHistory([{ role: "assistant", text }]);
+      }
+      setAssistantState("success");
+      setAssistantMessage("");
+    } catch (err) {
+      setAssistantState("error");
+      setAssistantMessage(err.message);
+      setChatHistory([{ role: "assistant", text: err.message }]);
+    }
+  }
 
   const visibleSidebarItems = workspaceMode === "ml" ? mlSidebarItems : sidebarItems;
   const activeItem = allSidebarItems.find((item) => item.id === activePanel) || visibleSidebarItems[0] || sidebarItems[0];
@@ -406,23 +423,25 @@ export function AuthenticatedApp({ session, onLogout }) {
   }
 
   useEffect(() => {
+    if (activePanel === "pricingAssistant" && chatHistory.length === 0) {
+      loadAssistantOpening();
+    }
+
     if (activePanel === "pricingAssistant" || activePanel === "mlDecisionSpace") {
       getUnresolvedAssistantDecision()
         .then((payload) => {
           if (payload.data) {
             setUnresolvedDecision(payload.data);
-            const hoursAgo = Math.max(1, Math.round((Date.now() - new Date(payload.data.createdAt).getTime()) / 3600000));
-            setChatHistory([
-              { 
-                role: "assistant", 
-                text: `Welcome back! About ${hoursAgo} hours ago, you recorded a decision for ${payload.data.product}. How did that go today?` 
-              }
-            ]);
+            parseAssistantDecision(`Ask for the measured outcome of the previous decision for ${payload.data.product}.`, null)
+              .then((draftPayload) => {
+                setChatHistory([{ role: "assistant", text: draftPayload.data?.conversationalResponse || "" }]);
+              })
+              .catch(() => {});
           }
         })
         .catch(() => {});
     }
-  }, [activePanel]);
+  }, [activePanel, chatHistory.length]);
 
   async function handleAssistantSubmit(event) {
     event.preventDefault();
@@ -441,21 +460,29 @@ export function AuthenticatedApp({ session, onLogout }) {
         // We are currently answering a feedback loop question
         const payload = await resolveAssistantDecision(unresolvedDecision._id, newUserMessage.text);
         setUnresolvedDecision(null);
-        setChatHistory(curr => [...curr, { role: "assistant", text: "Got it, I've updated your dataset with this outcome. What else would you like to record?" }]);
+        await loadAssistantOpening();
         setAssistantState("success");
         return;
       }
 
       // Send only the new input, plus the draft we've built so far
-      const payload = await parseAssistantDecision(assistantInput, currentParseDraft);
+      const payload = await parseAssistantDecision(assistantInput, currentParseDraft, {
+        forceMistral: assistantModelMode
+      });
       const draft = payload.data;
+      const diagnostics = draft.modelDiagnostics;
+      const modelMeta = diagnostics?.forced
+        ? `${diagnostics.mode || "mistral"} ${diagnostics.parsed ? "parsed" : "fallback"} in ${((diagnostics.latencyMs || 0) / 1000).toFixed(1)}s`
+        : "";
+      const shouldKeepDraftProgress = ["pricing_info", "correction"].includes(draft.conversationIntent);
       
-      let botResponseText = "";
-      if (draft.missingFields && draft.missingFields.length > 0) {
-        botResponseText = `Got it. To give you good advice, I still need: ${draft.missingFields.join(", ")}. Can you provide that?`;
+      if (draft.readyForConfirmation !== true || (draft.missingFields && draft.missingFields.length > 0)) {
+        const botResponseText = draft.conversationalResponse || assistantMessage || "";
         setLatestAssistantDecision(null);
-        setCurrentParseDraft(draft); // Save progress
-        setChatHistory(curr => [...curr, { role: "assistant", text: botResponseText }]);
+        setCurrentParseDraft(shouldKeepDraftProgress ? draft : null);
+        if (botResponseText) {
+          setChatHistory(curr => [...curr, { role: "assistant", text: botResponseText, meta: modelMeta }]);
+        }
       } else {
         // Stage 1: Trigger the Confirmation Card instead of saving
         setDraftDecision(draft);
@@ -473,8 +500,16 @@ export function AuthenticatedApp({ session, onLogout }) {
 
   async function handleConfirmDecision(isConfirmed) {
     if (!isConfirmed) {
+      const rejectedDraft = draftDecision;
       setDraftDecision(null);
-      setChatHistory(curr => [...curr, { role: "assistant", text: "No problem. Let's try again. What did you change?" }]);
+      setCurrentParseDraft(rejectedDraft);
+      try {
+        const payload = await parseAssistantDecision("wrong", rejectedDraft);
+        setCurrentParseDraft(payload.data || rejectedDraft);
+        setChatHistory(curr => [...curr, { role: "assistant", text: payload.data?.conversationalResponse || "" }]);
+      } catch (err) {
+        setAssistantMessage(err.message);
+      }
       return;
     }
 
@@ -497,15 +532,16 @@ export function AuthenticatedApp({ session, onLogout }) {
 
   async function handleSnoozeFeedback() {
     setUnresolvedDecision(null);
-    setChatHistory(curr => [...curr, { role: "assistant", text: "No worries, I'll ask you later. Need to record anything new right now?" }]);
+    await loadAssistantOpening();
   }
 
-  function handleResetAssistant() {
-    setChatHistory([{ role: "assistant", text: "Hi! Tell me about a recent price change you made." }]);
+  async function handleResetAssistant() {
+    setChatHistory([]);
     setAssistantInput("");
     setLatestAssistantDecision(null);
     setDraftDecision(null);
     setCurrentParseDraft(null);
+    await loadAssistantOpening();
   }
 
   async function refreshMlDecisionSummary() {
@@ -1174,6 +1210,7 @@ export function AuthenticatedApp({ session, onLogout }) {
         <PricingAssistantPanel
           assistantDecisions={assistantDecisions}
           assistantInput={assistantInput}
+          assistantModelMode={assistantModelMode}
           assistantMessage={assistantMessage}
           assistantState={assistantState}
           chatHistory={chatHistory}
@@ -1186,6 +1223,7 @@ export function AuthenticatedApp({ session, onLogout }) {
           latestAssistantDecision={latestAssistantDecision}
           refreshAssistantHistory={refreshAssistantHistory}
           setAssistantInput={setAssistantInput}
+          setAssistantModelMode={setAssistantModelMode}
           unresolvedDecision={unresolvedDecision}
         />
       );

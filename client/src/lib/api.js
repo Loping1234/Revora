@@ -462,13 +462,21 @@ export async function getAssistantDecisions(limit = 25) {
   return assertOk(response, `Assistant decision history failed with status ${response.status}`);
 }
 
-export async function parseAssistantDecision(message, existingDraft = null) {
+export async function getAssistantOpening() {
+  const response = await fetch(`${API_BASE_URL}/assistant/opening`, {
+    headers: apiHeaders()
+  });
+
+  return assertOk(response, `Assistant opening failed with status ${response.status}`);
+}
+
+export async function parseAssistantDecision(message, existingDraft = null, options = {}) {
   const response = await fetch(`${API_BASE_URL}/assistant/parse-decision`, {
     method: "POST",
     headers: apiHeaders({
       "Content-Type": "application/json"
     }),
-    body: JSON.stringify({ message, existingDraft })
+    body: JSON.stringify({ message, existingDraft, ...options })
   });
 
   return assertOk(response, `Assistant decision parse failed with status ${response.status}`);
